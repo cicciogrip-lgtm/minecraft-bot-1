@@ -4,7 +4,6 @@ const HOST = 'Valkyrie1.aternos.me'
 const PORT = 28603
 
 let bot = null
-let reconnecting = false
 let afkInterval = null
 
 function connect() {
@@ -18,23 +17,62 @@ function connect() {
     offline: true
   })
 
-  bot.once('spawn', () => {
+  bot.on('spawn', () => {
     console.log("Bot entrato nel server")
     startAntiAFK()
   })
 
-  bot.once('disconnect', reconnect)
-  bot.once('error', reconnect)
+  bot.on('disconnect', () => {
+    console.log("Disconnesso. Riprovo tra 6 secondi...")
+    stopAntiAFK()
+    setTimeout(connect, 6000)
+  })
+
+  bot.on('error', (err) => {
+    console.log("Errore:", err)
+    stopAntiAFK()
+    setTimeout(connect, 6000)
+  })
 }
 
-function reconnect() {
+function startAntiAFK() {
 
-  if (reconnecting) return
-  reconnecting = true
+  if (afkInterval) return
 
-  console.log("Disconnesso. Riprovo tra 6 secondi...")
+  afkInterval = setInterval(() => {
 
-  stopAntiAFK()
+    if (!bot || !bot.entity) return
+
+    try {
+
+      bot.queue('player_auth_input', {
+        pitch: 0,
+        yaw: Math.random() * 360,
+        head_yaw: Math.random() * 360,
+        position: bot.entity.position,
+        move_vector: {
+          x: Math.random() * 0.2,
+          z: Math.random() * 0.2
+        },
+        input_data: {},
+        tick: BigInt(Date.now())
+      })
+
+      console.log("Movimento anti AFK")
+
+    } catch {}
+
+  }, 30000)
+}
+
+function stopAntiAFK() {
+  if (afkInterval) {
+    clearInterval(afkInterval)
+    afkInterval = null
+  }
+}
+
+connect()  stopAntiAFK()
 
   setTimeout(() => {
     reconnecting = false
