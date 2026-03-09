@@ -6,15 +6,12 @@ const PORT = 28603;
 let bot = null;
 let afkInterval = null;
 
-// Variabili di controllo per non far accavallare le connessioni
+// Variabili per evitare connessioni multiple
 let isConnected = false;
 let isConnecting = false;
 
 function connect() {
-  // Se è già dentro o sta già provando a connettersi, fermati!
-  if (isConnected || isConnecting) {
-    return;
-  }
+  if (isConnected || isConnecting) return;
 
   isConnecting = true;
   console.log("Tentativo di connessione...");
@@ -29,12 +26,67 @@ function connect() {
   bot.on('spawn', () => {
     console.log("Bot entrato nel server");
     isConnecting = false;
-    isConnected = true; // Segna che è dentro
+    isConnected = true;
     startAntiAFK();
   });
 
   bot.on('disconnect', (packet) => {
-    console.log("Disconnesso. Motivo:", packet?.reason || "Sconosciuto");
+    console.log("Disconnesso. Motivo:", packet?.reason || "Chiusura connessione");
+    stopAntiAFK();
+    isConnecting = false;
+    isConnected = false;
+    
+    console.log("Riprovo tra 7 secondi...");
+    setTimeout(connect, 7000);
+  });
+
+  bot.on('error', (err) => {
+    console.log("Errore riscontrato:", err.message || err);
+    stopAntiAFK();
+    isConnecting = false;
+    isConnected = false;
+    
+    console.log("Riprovo tra 7 secondi...");
+    setTimeout(connect, 7000);
+  });
+}
+
+function startAntiAFK() {
+  if (afkInterval) return;
+
+  afkInterval = setInterval(() => {
+    if (!bot || !bot.entity) return;
+
+    try {
+      bot.queue('player_auth_input', {
+        pitch: 0,
+        yaw: Math.random() * 360,
+        head_yaw: Math.random() * 360,
+        position: bot.entity.position,
+        move_vector: {
+          x: (Math.random() - 0.5) * 0.1,
+          z: (Math.random() - 0.5) * 0.1
+        },
+        input_data: {},
+        tick: BigInt(Date.now()),
+        delta: { x: 0, y: 0, z: 0 }
+      });
+      console.log("Movimento anti AFK eseguito");
+    } catch (e) {
+      // Errore silenzioso se il pacchetto non parte
+    }
+  }, 30000);
+}
+
+function stopAntiAFK() {
+  if (afkInterval) {
+    clearInterval(afkInterval);
+    afkInterval = null;
+  }
+}
+
+// Avvio
+connect();    console.log("Disconnesso. Motivo:", packet?.reason || "Sconosciuto");
     stopAntiAFK();
     isConnecting = false;
     isConnected = false; // Segna che è uscito
