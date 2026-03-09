@@ -3,28 +3,57 @@ const bedrock = require('bedrock-protocol')
 const HOST = 'Valkyrie1.aternos.me'
 const PORT = 28603
 
-function startBot(){
+let bot = null
+let reconnecting = false
+let afkInterval = null
 
-console.log("Avvio bot...")
+function connect(){
 
-const bot = bedrock.createClient({
+console.log("Tentativo di connessione...")
+
+bot = bedrock.createClient({
   host: HOST,
   port: PORT,
   username: 'MobileBot',
   offline: true
 })
 
-bot.on('spawn', () => {
+bot.once('spawn', () => {
 
   console.log("Bot entrato nel server")
 
-  antiAFK(bot)
+  startAntiAFK()
 
 })
 
-function antiAFK(bot){
+bot.once('disconnect', reconnect)
+bot.once('error', reconnect)
 
-setInterval(() => {
+}
+
+function reconnect(){
+
+if(reconnecting) return
+reconnecting = true
+
+console.log("Disconnesso. Riprovo tra 6 secondi...")
+
+stopAntiAFK()
+
+setTimeout(() => {
+
+  reconnecting = false
+  connect()
+
+}, 6000)
+
+}
+
+function startAntiAFK(){
+
+if(afkInterval) return
+
+afkInterval = setInterval(() => {
 
   try{
 
@@ -35,6 +64,30 @@ setInterval(() => {
       position: bot.entity.position,
       move_vector: {
         x: Math.random() * 0.2,
+        z: Math.random() * 0.2
+      },
+      input_data: {},
+      tick: BigInt(Date.now())
+    })
+
+    console.log("Movimento anti AFK")
+
+  }catch{}
+
+}, 30000)
+
+}
+
+function stopAntiAFK(){
+
+if(afkInterval){
+  clearInterval(afkInterval)
+  afkInterval = null
+}
+
+}
+
+connect()        x: Math.random() * 0.2,
         z: Math.random() * 0.2
       },
       input_data: {},
