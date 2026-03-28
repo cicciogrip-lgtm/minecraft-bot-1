@@ -17,7 +17,7 @@ function connect() {
     host: HOST,
     port: PORT,
     username: 'MobileBot',
-    version: '1.21.11',
+    version: '1.26.11',
     offline: true
   });
 
