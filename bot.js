@@ -6,24 +6,16 @@ const USERNAME = 'MobileBot';
 
 let bot = null;
 let afkInterval = null;
-let reconnectTimeout = null;
-let connectTimeout = null;
-
 let isConnected = false;
 let isConnecting = false;
 let tick = 0;
 
 // ======================
-// CONNESSIONE
-// ======================
 function connect() {
-  if (isConnected || isConnecting) {
-    console.log("⏳ Già connesso o in connessione...");
-    return;
-  }
+  if (isConnected || isConnecting) return;
 
   isConnecting = true;
-  console.log("🔌 Connessione in corso...");
+  console.log("🔌 Connessione...");
 
   cleanupBot();
 
@@ -34,86 +26,67 @@ function connect() {
     offline: true
   });
 
-  // Timeout anti blocco (SERVER OFFLINE)
-  connectTimeout = setTimeout(() => {
-    if (!isConnected) {
-      console.log("⏱️ Timeout connessione, reset...");
-      isConnecting = false;
-      try { bot.disconnect(); } catch(e) {}
-    }
-  }, 8000);
-
   bot.on('spawn', () => {
-    console.log("✅ Bot entrato nel server");
+    console.log("✅ Entrato nel server");
 
     isConnected = true;
     isConnecting = false;
 
-    clearTimeout(connectTimeout);
     startAntiAFK();
   });
 
   bot.on('disconnect', (packet) => {
-    console.log("❌ Disconnesso:", packet?.reason || "sconosciuto");
-    forceReconnect();
+    console.log("❌ Disconnesso:", packet?.reason || "unknown");
+    cleanupAll();
+    scheduleReconnect();
   });
 
   bot.on('error', (err) => {
     console.log("⚠️ Errore:", err.message || err);
-    forceReconnect();
+    cleanupAll();
+    scheduleReconnect();
+  });
+
+  // 👇 CONTROLLO PLAYER LIST
+  bot.on('player_list', (packet) => {
+    if (!isConnected) return;
+
+    if (packet.records && packet.records.type === 'remove') {
+      for (const player of packet.records.records) {
+        if (player.username === USERNAME) {
+          console.log("🚨 Bot rimosso dalla lista!");
+          cleanupAll();
+          scheduleReconnect();
+        }
+      }
+    }
   });
 }
 
 // ======================
-// RECONNECT
-// ======================
-function forceReconnect() {
-  cleanupAll();
+function scheduleReconnect() {
+  if (isConnecting) return;
 
-  if (reconnectTimeout) return;
-
-  console.log("🔄 Riconnessione tra 5 secondi...");
-
-  reconnectTimeout = setTimeout(() => {
-    reconnectTimeout = null;
-    connect();
-  }, 5000);
+  console.log("🔄 Reconnect tra 5s...");
+  setTimeout(connect, 5000);
 }
 
 // ======================
-// WATCHDOG (ANTI FREEZE)
-// ======================
-setInterval(() => {
-  if (!isConnected && !isConnecting) {
-    console.log("🔍 Server offline? Riprovo...");
-    connect();
-  }
-}, 15000);
-
-// ======================
-// PULIZIA
-// ======================
 function cleanupBot() {
   if (bot) {
-    try { bot.disconnect(); } catch (e) {}
+    try { bot.disconnect(); } catch(e) {}
     bot = null;
   }
 }
 
 function cleanupAll() {
   stopAntiAFK();
-
-  if (connectTimeout) {
-    clearTimeout(connectTimeout);
-    connectTimeout = null;
-  }
-
   isConnected = false;
   isConnecting = false;
-
   cleanupBot();
 }
 
+// ======================
 function startAntiAFK() {
   if (afkInterval) return;
 
@@ -128,17 +101,14 @@ function startAntiAFK() {
         yaw: Math.random() * 360,
         head_yaw: Math.random() * 360,
         position: bot.entity.position,
-        move_vector: {
-          x: (Math.random() - 0.5) * 0.1,
-          z: (Math.random() - 0.5) * 0.1
-        },
+        move_vector: { x: 0, z: 0 },
         input_data: {},
         tick: BigInt(tick),
         delta: { x: 0, y: 0, z: 0 }
       });
 
-      console.log("🟢 Anti-AFK");
-    } catch (e) {}
+      console.log("🟢 AFK");
+    } catch(e) {}
   }, 30000);
 }
 
@@ -148,4 +118,6 @@ function stopAntiAFK() {
     afkInterval = null;
   }
 }
+
+// ======================
 connect();
