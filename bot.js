@@ -30,15 +30,13 @@ function connect() {
     offline: true
   });
 
-  // 🔥 FIX BLOCCO CONNESSIONE
+  // ✅ FIX: reset stato SENZA disconnettere
   setTimeout(() => {
-    if (!isConnected) {
-      console.log("⏱️ Timeout connessione, reset...");
+    if (!isConnected && isConnecting) {
+      console.log("⏱️ Reset stato connessione...");
       isConnecting = false;
-
-      try { bot.disconnect(); } catch (e) {}
     }
-  }, 10000);
+  }, 15000);
 
   bot.on('spawn', () => {
     console.log("✅ Entrato nel server");
@@ -59,7 +57,7 @@ function connect() {
     handleDisconnect();
   });
 
-  // controllo rimozione player
+  // controllo se viene rimosso dalla player list
   bot.on('player_list', (packet) => {
     if (!isConnected) return;
 
