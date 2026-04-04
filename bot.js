@@ -6,10 +6,14 @@ const USERNAME = 'MobileBot';
 
 let bot = null;
 let afkInterval = null;
+let reconnectTimeout = null;
+
 let isConnected = false;
 let isConnecting = false;
 let tick = 0;
 
+// ======================
+// CONNESSIONE
 // ======================
 function connect() {
   if (isConnected || isConnecting) return;
@@ -37,26 +41,23 @@ function connect() {
 
   bot.on('disconnect', (packet) => {
     console.log("❌ Disconnesso:", packet?.reason || "unknown");
-    cleanupAll();
-    scheduleReconnect();
+    handleDisconnect();
   });
 
   bot.on('error', (err) => {
     console.log("⚠️ Errore:", err.message || err);
-    cleanupAll();
-    scheduleReconnect();
+    handleDisconnect();
   });
 
-  // 👇 CONTROLLO PLAYER LIST
+  // controllo se viene rimosso dalla lista player
   bot.on('player_list', (packet) => {
     if (!isConnected) return;
 
-    if (packet.records && packet.records.type === 'remove') {
+    if (packet.records?.type === 'remove') {
       for (const player of packet.records.records) {
         if (player.username === USERNAME) {
-          console.log("🚨 Bot rimosso dalla lista!");
-          cleanupAll();
-          scheduleReconnect();
+          console.log("🚨 Bot rimosso dal server!");
+          handleDisconnect();
         }
       }
     }
@@ -64,13 +65,33 @@ function connect() {
 }
 
 // ======================
-function scheduleReconnect() {
-  if (isConnecting) return;
+// DISCONNECT HANDLER
+// ======================
+function handleDisconnect() {
+  cleanupAll();
+
+  if (reconnectTimeout) return;
 
   console.log("🔄 Reconnect tra 5s...");
-  setTimeout(connect, 5000);
+
+  reconnectTimeout = setTimeout(() => {
+    reconnectTimeout = null;
+    connect();
+  }, 5000);
 }
 
+// ======================
+// WATCHDOG (SERVER OFFLINE)
+// ======================
+setInterval(() => {
+  if (!isConnected && !isConnecting) {
+    console.log("🔍 Server offline? Tentativo...");
+    connect();
+  }
+}, 30000); // ogni 30 secondi
+
+// ======================
+// PULIZIA
 // ======================
 function cleanupBot() {
   if (bot) {
@@ -86,6 +107,8 @@ function cleanupAll() {
   cleanupBot();
 }
 
+// ======================
+// ANTI AFK (LEGGERO)
 // ======================
 function startAntiAFK() {
   if (afkInterval) return;
@@ -107,8 +130,8 @@ function startAntiAFK() {
         delta: { x: 0, y: 0, z: 0 }
       });
 
-      console.log("🟢 AFK");
-    } catch(e) {}
+      console.log("🟢 Anti-AFK");
+    } catch (e) {}
   }, 30000);
 }
 
@@ -119,5 +142,7 @@ function stopAntiAFK() {
   }
 }
 
+// ======================
+// START
 // ======================
 connect();
