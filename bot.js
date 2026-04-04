@@ -30,6 +30,16 @@ function connect() {
     offline: true
   });
 
+  // 🔥 FIX BLOCCO CONNESSIONE
+  setTimeout(() => {
+    if (!isConnected) {
+      console.log("⏱️ Timeout connessione, reset...");
+      isConnecting = false;
+
+      try { bot.disconnect(); } catch (e) {}
+    }
+  }, 10000);
+
   bot.on('spawn', () => {
     console.log("✅ Entrato nel server");
 
@@ -49,14 +59,14 @@ function connect() {
     handleDisconnect();
   });
 
-  // controllo se viene rimosso dalla lista player
+  // controllo rimozione player
   bot.on('player_list', (packet) => {
     if (!isConnected) return;
 
     if (packet.records?.type === 'remove') {
       for (const player of packet.records.records) {
         if (player.username === USERNAME) {
-          console.log("🚨 Bot rimosso dal server!");
+          console.log("🚨 Bot rimosso!");
           handleDisconnect();
         }
       }
@@ -65,7 +75,7 @@ function connect() {
 }
 
 // ======================
-// DISCONNECT HANDLER
+// RECONNECT
 // ======================
 function handleDisconnect() {
   cleanupAll();
@@ -88,14 +98,14 @@ setInterval(() => {
     console.log("🔍 Server offline? Tentativo...");
     connect();
   }
-}, 30000); // ogni 30 secondi
+}, 30000);
 
 // ======================
 // PULIZIA
 // ======================
 function cleanupBot() {
   if (bot) {
-    try { bot.disconnect(); } catch(e) {}
+    try { bot.disconnect(); } catch (e) {}
     bot = null;
   }
 }
@@ -108,7 +118,7 @@ function cleanupAll() {
 }
 
 // ======================
-// ANTI AFK (LEGGERO)
+// ANTI AFK
 // ======================
 function startAntiAFK() {
   if (afkInterval) return;
