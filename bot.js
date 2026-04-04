@@ -18,12 +18,12 @@ let tick = 0;
 // ======================
 function connect() {
   if (isConnected || isConnecting) {
-    console.log("Già connesso o in connessione...");
+    console.log("⏳ Già connesso o in connessione...");
     return;
   }
 
   isConnecting = true;
-  console.log("Connessione in corso...");
+  console.log("🔌 Connessione in corso...");
 
   cleanupBot();
 
@@ -34,13 +34,14 @@ function connect() {
     offline: true
   });
 
-  // timeout sicurezza (evita loop bug)
+  // Timeout anti blocco (SERVER OFFLINE)
   connectTimeout = setTimeout(() => {
     if (!isConnected) {
-      console.log("Timeout connessione, riprovo...");
-      forceReconnect();
+      console.log("⏱️ Timeout connessione, reset...");
+      isConnecting = false;
+      try { bot.disconnect(); } catch(e) {}
     }
-  }, 10000);
+  }, 8000);
 
   bot.on('spawn', () => {
     console.log("✅ Bot entrato nel server");
@@ -64,7 +65,7 @@ function connect() {
 }
 
 // ======================
-// RECONNECT PULITO
+// RECONNECT
 // ======================
 function forceReconnect() {
   cleanupAll();
@@ -78,6 +79,16 @@ function forceReconnect() {
     connect();
   }, 5000);
 }
+
+// ======================
+// WATCHDOG (ANTI FREEZE)
+// ======================
+setInterval(() => {
+  if (!isConnected && !isConnecting) {
+    console.log("🔍 Server offline? Riprovo...");
+    connect();
+  }
+}, 15000);
 
 // ======================
 // PULIZIA
