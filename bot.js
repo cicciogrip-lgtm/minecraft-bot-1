@@ -2,78 +2,94 @@ const bedrock = require('bedrock-protocol');
 
 const HOST = 'RustedSurvival.aternos.me';
 const PORT = 58137;
+const USERNAME = 'MobileBot';
 
 let bot = null;
 let afkInterval = null;
+let reconnectTimeout = null;
+let connectTimeout = null;
+
 let isConnected = false;
 let isConnecting = false;
-let connectTimeout = null;
 let tick = 0;
 
+// ======================
+// CONNESSIONE
+// ======================
 function connect() {
   if (isConnected || isConnecting) {
-    console.log("Già connesso o in connessione, skip...");
+    console.log("Già connesso o in connessione...");
     return;
   }
 
   isConnecting = true;
-  console.log("Tentativo di connessione...");
+  console.log("Connessione in corso...");
 
-  // sicurezza: chiudi eventuale bot vecchio
-  if (bot) {
-    try { bot.disconnect(); } catch(e) {}
-    bot = null;
-  }
+  cleanupBot();
 
   bot = bedrock.createClient({
     host: HOST,
     port: PORT,
-    username: 'MobileBot',
+    username: USERNAME,
     offline: true
   });
 
-  // timeout anti doppia connessione
+  // timeout sicurezza (evita loop bug)
   connectTimeout = setTimeout(() => {
     if (!isConnected) {
-      console.log("Timeout connessione, riavvio...");
-      try { bot.disconnect(); } catch(e) {}
-      isConnecting = false;
-      connect();
+      console.log("Timeout connessione, riprovo...");
+      forceReconnect();
     }
   }, 10000);
 
   bot.on('spawn', () => {
-    console.log("Bot entrato nel server");
-    isConnecting = false;
+    console.log("✅ Bot entrato nel server");
+
     isConnected = true;
+    isConnecting = false;
 
     clearTimeout(connectTimeout);
     startAntiAFK();
   });
 
   bot.on('disconnect', (packet) => {
-    console.log("Disconnesso. Motivo:", packet?.reason || "Chiusura");
-
-    cleanup();
-    reconnect();
+    console.log("❌ Disconnesso:", packet?.reason || "sconosciuto");
+    forceReconnect();
   });
 
   bot.on('error', (err) => {
-    console.log("Errore:", err.message || err);
-
-    cleanup();
-    reconnect();
+    console.log("⚠️ Errore:", err.message || err);
+    forceReconnect();
   });
 }
 
-function reconnect() {
-  if (isConnecting) return;
+// ======================
+// RECONNECT PULITO
+// ======================
+function forceReconnect() {
+  cleanupAll();
 
-  console.log("Riconnessione tra 7 secondi...");
-  setTimeout(connect, 7000);
+  if (reconnectTimeout) return;
+
+  console.log("🔄 Riconnessione tra 5 secondi...");
+
+  reconnectTimeout = setTimeout(() => {
+    reconnectTimeout = null;
+    connect();
+  }, 5000);
 }
 
-function cleanup() {
+// ======================
+// PULIZIA
+// ======================
+function cleanupBot() {
+  if (bot) {
+    try { bot.disconnect(); } catch (e) {}
+    bot = null;
+  }
+}
+
+function cleanupAll() {
   stopAntiAFK();
 
   if (connectTimeout) {
@@ -81,13 +97,10 @@ function cleanup() {
     connectTimeout = null;
   }
 
-  isConnecting = false;
   isConnected = false;
+  isConnecting = false;
 
-  if (bot) {
-    try { bot.disconnect(); } catch(e) {}
-    bot = null;
-  }
+  cleanupBot();
 }
 
 function startAntiAFK() {
@@ -113,7 +126,7 @@ function startAntiAFK() {
         delta: { x: 0, y: 0, z: 0 }
       });
 
-      console.log("Movimento anti AFK");
+      console.log("🟢 Anti-AFK");
     } catch (e) {}
   }, 30000);
 }
@@ -124,5 +137,4 @@ function stopAntiAFK() {
     afkInterval = null;
   }
 }
-
 connect();
