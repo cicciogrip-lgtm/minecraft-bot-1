@@ -1,7 +1,7 @@
 const bedrock = require('bedrock-protocol');
 
-const HOST = 'Valkyrie1.aternos.me';
-const PORT = 28603;
+const HOST = 'RustedSurvival.aternos.me';
+const PORT = 58137;
 
 let bot = null;
 let afkInterval = null;
