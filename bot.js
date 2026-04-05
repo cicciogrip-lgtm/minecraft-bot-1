@@ -12,6 +12,9 @@ let isConnected = false;
 let isConnecting = false;
 let tick = 0;
 
+// 🔥 controllo attività
+let lastPacketTime = Date.now();
+
 // ======================
 // CONNESSIONE
 // ======================
@@ -30,10 +33,10 @@ function connect() {
     offline: true
   });
 
-  // ✅ FIX: reset stato SENZA disconnettere
+  // reset stato se si blocca in connessione
   setTimeout(() => {
     if (!isConnected && isConnecting) {
-      console.log("⏱️ Reset stato connessione...");
+      console.log("⏱️ Connessione bloccata, reset...");
       isConnecting = false;
     }
   }, 15000);
@@ -43,8 +46,13 @@ function connect() {
 
     isConnected = true;
     isConnecting = false;
+    lastPacketTime = Date.now();
 
     startAntiAFK();
+  });
+
+  bot.on('packet', () => {
+    lastPacketTime = Date.now();
   });
 
   bot.on('disconnect', (packet) => {
@@ -57,7 +65,6 @@ function connect() {
     handleDisconnect();
   });
 
-  // controllo se viene rimosso dalla player list
   bot.on('player_list', (packet) => {
     if (!isConnected) return;
 
@@ -89,21 +96,34 @@ function handleDisconnect() {
 }
 
 // ======================
-// WATCHDOG (SERVER OFFLINE)
+// WATCHDOG INTELLIGENTE
 // ======================
 setInterval(() => {
-  if (!isConnected && !isConnecting) {
-    console.log("🔍 Server offline? Tentativo...");
+  const now = Date.now();
+  const isBotAlive = bot && bot.entity;
+
+  // 🧠 1. bot morto
+  if (!isBotAlive && !isConnecting) {
+    console.log("🔍 Bot non attivo, reconnect...");
+    isConnected = false;
     connect();
+    return;
   }
-}, 30000);
+
+  // 🧠 2. bot freezato (nessun packet da 30s)
+  if (isConnected && now - lastPacketTime > 30000) {
+    console.log("❄️ Bot freezato, reconnect...");
+    handleDisconnect();
+  }
+
+}, 15000); // controlla ogni 15s
 
 // ======================
 // PULIZIA
 // ======================
 function cleanupBot() {
   if (bot) {
-    try { bot.disconnect(); } catch (e) {}
+    try { bot.disconnect(); } catch(e) {}
     bot = null;
   }
 }
@@ -149,8 +169,4 @@ function stopAntiAFK() {
     afkInterval = null;
   }
 }
-
-// ======================
-// START
-// ======================
 connect();
