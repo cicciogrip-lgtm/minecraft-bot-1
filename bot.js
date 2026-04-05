@@ -20,14 +20,15 @@ let yaw = 0;
 // CONNESSIONE
 // ======================
 function connect() {
-  // BLOCCA la connessione se siamo già dentro o se stiamo già provando a connetterci
-  if (isConnected || isConnecting) return;
+  // 1. Se sta già connettendo o è connesso, ESCE subito.
+  if (isConnecting || isConnected) {
+    return;
+  }
 
   isConnecting = true;
-  lastPacketTime = Date.now(); 
-  console.log(`🔌 Tentativo di connessione a ${HOST}...`);
+  console.log(`🔌 [${new Date().toLocaleTimeString()}] Tentativo di connessione...`);
 
-  cleanupBot();
+  cleanupBot(); // Pulisce tutto prima di iniziare
 
   try {
     bot = bedrock.createClient({
@@ -35,86 +36,99 @@ function connect() {
       port: PORT,
       username: USERNAME,
       offline: true,
-      connectTimeout: 10000 
+      connectTimeout: 15000 
     });
+
+    // Gestione timeout critico: se dopo 30s non è spawnato, resetta lo stato
+    const connectionGuard = setTimeout(() => {
+      if (isConnecting && !isConnected) {
+        console.log("⚠️ Connessione fallita per timeout interno.");
+        isConnecting = false;
+        handleDisconnect();
+      }
+    }, 30000);
+
+    bot.on('start_game', (packet) => {
+      pos = packet.player_position;
+    });
+
+    bot.on('spawn', () => {
+      clearTimeout(connectionGuard);
+      console.log("✅ Entrato nel server!");
+      isConnected = true;
+      isConnecting = false;
+      lastPacketTime = Date.now();
+      startAntiAFK();
+    });
+
+    bot.on('packet', () => {
+      lastPacketTime = Date.now();
+    });
+
+    bot.on('error', (err) => {
+      console.log("⚠️ Errore client:", err.message);
+      // Non chiamare handleDisconnect qui se isConnecting è true, 
+      // lo gestirà il close o il guard
+    });
+
+    bot.on('close', () => {
+      console.log("❌ Connessione chiusa.");
+      handleDisconnect();
+    });
+
   } catch (err) {
-    console.log("⚠️ Errore creazione client:", err.message);
-    isConnecting = false; // Reset immediato se fallisce la creazione
+    console.log("⚠️ Errore fatale creazione client:", err.message);
+    isConnecting = false;
     handleDisconnect();
-    return;
   }
-
-  bot.on('start_game', (packet) => {
-    pos = packet.player_position;
-  });
-
-  bot.on('spawn', () => {
-    console.log("✅ Entrato nel server!");
-    isConnected = true;
-    isConnecting = false; // Ora siamo ufficialmente dentro
-    lastPacketTime = Date.now();
-    startAntiAFK();
-  });
-
-  bot.on('packet', () => {
-    lastPacketTime = Date.now();
-  });
-
-  bot.on('error', (err) => {
-    console.log("⚠️ Errore di rete:", err.message);
-    handleDisconnect();
-  });
-
-  bot.on('close', () => {
-    console.log("❌ Connessione chiusa.");
-    handleDisconnect();
-  });
 }
 
 // ======================
-// RECONNECT (SICURO)
+// RECONNECT
 // ======================
 function handleDisconnect() {
   cleanupAll();
 
-  // Se c'è già un timer attivo per riconnettersi, non farne un altro!
   if (reconnectTimeout) return;
 
-  console.log("🔄 Riconnessione programmata tra 10s...");
-  
+  console.log("🔄 Riconnessione tra 10 secondi...");
   reconnectTimeout = setTimeout(() => {
-    reconnectTimeout = null; // Libera il timer prima di chiamare connect
+    reconnectTimeout = null;
     connect();
-  }, 10000); 
+  }, 10000);
 }
 
 // ======================
-// WATCHDOG (NON AGGRESSIVO)
+// WATCHDOG (CONTROLLO OGNI 20 SECONDI)
 // ======================
 setInterval(() => {
   const now = Date.now();
 
-  // 1. Se il bot non è connesso, non sta connettendo E non c'è un timer di attesa
+  // Se il bot è "perso" nel limbo (non connette, non è connesso, non ha timer)
   if (!isConnected && !isConnecting && !reconnectTimeout) {
-    console.log("🔍 Watchdog: Bot fermo, avvio connessione...");
+    console.log("🔍 Watchdog: Stato inconsistente rilevato, forzo connect.");
     connect();
-    return;
   }
 
-  // 2. Se è "connesso" ma il server non invia nulla da 45s (Timeout)
-  if (isConnected && (now - lastPacketTime > 45000)) {
-    console.log("❄️ Watchdog: Timeout pacchetti, forzo riavvio...");
+  // Se è connesso ma il server non risponde (Freeze)
+  if (isConnected && (now - lastPacketTime > 60000)) {
+    console.log("❄️ Watchdog: Server freezato, riavvio...");
     handleDisconnect();
   }
-}, 15000);
+}, 20000);
 
 // ======================
-// PULIZIA
+// PULIZIA MANIACALE
 // ======================
 function cleanupBot() {
   if (bot) {
-    bot.removeAllListeners(); 
-    try { bot.close(); } catch(e) {}
+    // Rimuove tutti gli event listener per evitare che vecchi eventi 
+    // scatenino doppie riconnessioni
+    bot.removeAllListeners();
+    try {
+      bot.close(); 
+      bot.terminate(); // Se disponibile nella versione della lib
+    } catch(e) {}
     bot = null;
   }
 }
@@ -122,7 +136,7 @@ function cleanupBot() {
 function cleanupAll() {
   stopAntiAFK();
   isConnected = false;
-  isConnecting = false;
+  isConnecting = false; // Reset fondamentale
   cleanupBot();
 }
 
@@ -137,7 +151,7 @@ function startAntiAFK() {
 
     try {
       tick++;
-      yaw = (yaw + 15) % 360;
+      yaw = (yaw + 20) % 360;
 
       bot.queue('player_auth_input', {
         pitch: 0,
