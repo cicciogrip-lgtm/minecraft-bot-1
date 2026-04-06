@@ -11,23 +11,22 @@ let loginTimer = null;
 
 let isConnected = false;    
 let isConnecting = false;   
-let connectionStartTime = 0; // ⏱️ Novità: Serve per capire se si blocca durante l'ingresso
-
 let lastPacketTime = Date.now();
 let tick = 0n;
+
+// Inizializziamo pos con valori numerici sicuri per evitare "undefined"
 let pos = { x: 0, y: 0, z: 0 }; 
 let yaw = 0;
 let entityId = 0n;
 
-// ======================
-// CONNESSIONE
-// ======================
 function connect() {
-  if (isConnecting || isConnected) return;
+  if (isConnected) return;
+  // Se sta connettendo da più di 30s, permettiamo un nuovo tentativo (reset del blocco)
+  if (isConnecting && (Date.now() - lastPacketTime < 30000)) return;
 
   isConnecting = true;
-  connectionStartTime = Date.now(); // Salviamo l'orario di inizio tentativo
-  console.log(`🔌 [${new Date().toLocaleTimeString()}] Avvio connessione a ${HOST}...`);
+  lastPacketTime = Date.now(); 
+  console.log(`🔌 [${new Date().toLocaleTimeString()}] Connessione in corso...`);
 
   cleanupBot();
 
@@ -37,25 +36,23 @@ function connect() {
       port: PORT,
       username: USERNAME,
       offline: true,
-      connectTimeout: 20000 
+      connectTimeout: 15000 
     });
 
     bot.on('start_game', (packet) => {
-      if (packet.player_position) pos = packet.player_position;
+      // Salviamo la posizione solo se il pacchetto la contiene davvero
+      if (packet.player_position && typeof packet.player_position.x !== 'undefined') {
+        pos = packet.player_position;
+      }
       entityId = packet.runtime_entity_id; 
     });
 
-    bot.on('move_player', (packet) => {
-      if (packet.runtime_id === entityId) {
-        pos = packet.position;
-      }
-    });
-
     bot.on('spawn', () => {
-      console.log("📨 Ricevuto spawn. Stabilizzazione in corso...");
+      console.log("📨 Spawn rilevato. Attesa stabilità...");
       
+      if (loginTimer) clearTimeout(loginTimer);
       loginTimer = setTimeout(() => {
-        console.log("✅ Connessione stabilizzata correttamente!");
+        console.log("✅ Bot ONLINE!");
         isConnected = true;
         isConnecting = false;
         lastPacketTime = Date.now();
@@ -66,80 +63,55 @@ function connect() {
     bot.on('packet', () => { lastPacketTime = Date.now(); });
 
     bot.on('error', (err) => { 
-      console.log("⚠️ Errore Client:", err.message); 
-      // Se c'è un errore mentre cerca di entrare, forza la disconnessione
-      if (isConnecting) handleDisconnect();
+      console.log("⚠️ Errore:", err.message);
+      handleDisconnect(); 
     });
 
     bot.on('close', () => {
-      console.log("❌ Connessione chiusa dal server.");
-      handleDisconnect();
-    });
-
-    bot.on('disconnect', (packet) => {
-      console.log("🚪 Kickato o disconnesso:", packet.reason || "Sconosciuto");
+      console.log("❌ Connessione chiusa.");
       handleDisconnect();
     });
 
   } catch (err) {
-    console.log("⚠️ Errore fatale di creazione:", err.message);
+    console.log("⚠️ Errore creazione client:", err.message);
     handleDisconnect();
   }
 }
 
-// ======================
-// RICONNESSIONE
-// ======================
 function handleDisconnect() {
   cleanupAll();
-  
   if (reconnectTimeout) return;
   
-  console.log("🔄 Riprovo a connettermi tra 10 secondi...");
+  console.log("🔄 Riconnessione tra 10s...");
   reconnectTimeout = setTimeout(() => {
     reconnectTimeout = null;
     connect();
   }, 10000);
 }
 
-// ======================
-// WATCHDOG AGGRESSIVO
-// ======================
-// Controlla la salute del bot ogni 15 secondi invece di 30
+// WATCHDOG MIGLIORATO
 setInterval(() => {
   const now = Date.now();
-  
-  // 1. BLOCCO FANTASMA: Se sta "connettendo" da più di 45 secondi, si è incantato
-  if (isConnecting && (now - connectionStartTime > 45000)) {
-     console.log("⏱️ Watchdog: Connessione bloccata nel vuoto da 45s, forzo il reset!");
-     handleDisconnect();
-     return;
-  }
 
-  // Se c'è un timer di riconnessione attivo, lo lasciamo lavorare in pace
-  if (reconnectTimeout) return;
-
-  // 2. INATTIVO: Non è connesso, non sta connettendo e non ci sono timer
-  if (!isConnected && !isConnecting) {
-    console.log("🔍 Watchdog: Bot completamente inattivo, lo faccio ripartire.");
-    connect();
+  // Se il bot è "connesso" ma non arrivano pacchetti da 60s
+  if (isConnected && (now - lastPacketTime > 60000)) {
+    console.log("❄️ Timeout rilevato, riavvio...");
+    handleDisconnect();
     return;
   }
 
-  // 3. FREEZATO: È "connesso" ma Aternos non invia dati da 90 secondi (crash/lag)
-  if (isConnected && (now - lastPacketTime > 90000)) {
-    console.log("❄️ Watchdog: Server laggato o freezato, riavvio la sessione.");
-    handleDisconnect();
+  // Se il bot è spento e non sta già aspettando il timer di riconnessione
+  if (!isConnected && !reconnectTimeout) {
+    console.log("🔍 Watchdog: Bot offline, forzo riavvio.");
+    isConnecting = false; // Sblocca il lucchetto
+    connect();
   }
 }, 15000);
 
-// ======================
-// PULIZIA SICURA
-// ======================
 function cleanupBot() {
   if (loginTimer) clearTimeout(loginTimer);
   if (bot) {
-    bot.removeAllListeners(); // IMPORTANTISSIMO per evitare trigger doppi
+    bot.removeAllListeners();
     try { bot.close(); } catch(e) {}
     bot = null;
   }
@@ -148,30 +120,36 @@ function cleanupBot() {
 function cleanupAll() {
   stopAntiAFK();
   isConnected = false;
-  isConnecting = false; // Questo resetta il lucchetto e permette nuovi tentativi!
+  isConnecting = false;
   cleanupBot();
 }
 
-// ======================
-// ANTI-AFK (CON FIX JOYSTICK)
-// ======================
 function startAntiAFK() {
-  if (afkInterval) return;
+  if (afkInterval) clearInterval(afkInterval);
 
   afkInterval = setInterval(() => {
-    if (!isConnected || !bot || !pos || typeof pos.x === 'undefined') return;
+    // PROTEZIONE CRITICA PER LA X:
+    // Se pos non è un oggetto o x non esiste, non inviare il pacchetto
+    if (!isConnected || !bot || !pos || typeof pos.x === 'undefined') {
+      console.log("⏳ In attesa di coordinate valide...");
+      return;
+    }
 
     try {
       tick++;
-      yaw = (yaw + 15) % 360;
+      yaw = (yaw + 20) % 360;
 
       bot.queue('player_auth_input', {
         pitch: 0,
         yaw: yaw,
         head_yaw: yaw,
-        position: { x: pos.x, y: pos.y, z: pos.z }, 
+        position: { 
+            x: Number(pos.x), 
+            y: Number(pos.y), 
+            z: Number(pos.z) 
+        }, 
         move_vector: { x: 0, z: 0 },
-        analog_move_vector: { x: 0, z: 0 }, // Fix per Bedrock 1.20+
+        analog_move_vector: { x: 0, z: 0 },
         input_data: 0n,
         input_mode: 'mouse',
         play_mode: 'screen',
@@ -183,11 +161,9 @@ function startAntiAFK() {
       if (entityId !== 0n) {
         bot.queue('animate', { action_id: 1, runtime_entity_id: entityId });
       }
-
-      console.log("🟢 Anti-AFK inviato");
-
+      console.log("🟢 Anti-AFK OK");
     } catch (e) {
-      console.log("⚠️ Errore invio pacchetto:", e.message);
+      console.log("⚠️ Salto pacchetto AFK per sicurezza.");
     }
   }, 30000);
 }
@@ -199,5 +175,4 @@ function stopAntiAFK() {
   }
 }
 
-// AVVIO
 connect();
