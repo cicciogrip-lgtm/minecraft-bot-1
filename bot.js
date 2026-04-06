@@ -7,9 +7,10 @@ const USERNAME = 'MobileBot';
 let bot = null;
 let afkInterval = null;
 let reconnectTimeout = null;
+let loginTimer = null; // Timer per la stabilizzazione
 
-let isConnected = false;
-let isConnecting = false;
+let isConnected = false;    // Vero solo dopo che il bot è spawnato E stabilizzato
+let isConnecting = false;   // Vero durante l'handshake iniziale
 
 let lastPacketTime = Date.now();
 let tick = 0n;
@@ -17,18 +18,16 @@ let pos = { x: 0, y: 0, z: 0 };
 let yaw = 0;
 
 // ======================
-// CONNESSIONE
+// FUNZIONE DI CONNESSIONE
 // ======================
 function connect() {
-  // 1. Se sta già connettendo o è connesso, ESCE subito.
-  if (isConnecting || isConnected) {
-    return;
-  }
+  // Blocco critico: evita doppie istanze
+  if (isConnecting || isConnected) return;
 
   isConnecting = true;
-  console.log(`🔌 [${new Date().toLocaleTimeString()}] Tentativo di connessione...`);
+  console.log(`🔌 [${new Date().toLocaleTimeString()}] Avvio connessione a ${HOST}...`);
 
-  cleanupBot(); // Pulisce tutto prima di iniziare
+  cleanupBot();
 
   try {
     bot = bedrock.createClient({
@@ -36,29 +35,25 @@ function connect() {
       port: PORT,
       username: USERNAME,
       offline: true,
-      connectTimeout: 15000 
+      connectTimeout: 20000 // Più tempo per gli handshake lenti di Railway
     });
-
-    // Gestione timeout critico: se dopo 30s non è spawnato, resetta lo stato
-    const connectionGuard = setTimeout(() => {
-      if (isConnecting && !isConnected) {
-        console.log("⚠️ Connessione fallita per timeout interno.");
-        isConnecting = false;
-        handleDisconnect();
-      }
-    }, 30000);
 
     bot.on('start_game', (packet) => {
       pos = packet.player_position;
     });
 
     bot.on('spawn', () => {
-      clearTimeout(connectionGuard);
-      console.log("✅ Entrato nel server!");
-      isConnected = true;
-      isConnecting = false;
-      lastPacketTime = Date.now();
-      startAntiAFK();
+      console.log("📨 Ricevuto pacchetto spawn. Stabilizzazione in corso (5s)...");
+      
+      // SAFE LOGIN: Aspettiamo 5 secondi prima di iniziare a inviare pacchetti Anti-AFK
+      // Questo evita il kick immediato per "Protocol Error" su Aternos
+      loginTimer = setTimeout(() => {
+        console.log("✅ Connessione stabilizzata correttamente!");
+        isConnected = true;
+        isConnecting = false;
+        lastPacketTime = Date.now();
+        startAntiAFK();
+      }, 5000);
     });
 
     bot.on('packet', () => {
@@ -66,9 +61,8 @@ function connect() {
     });
 
     bot.on('error', (err) => {
-      console.log("⚠️ Errore client:", err.message);
-      // Non chiamare handleDisconnect qui se isConnecting è true, 
-      // lo gestirà il close o il guard
+      console.log("⚠️ Errore Client:", err.message);
+      // Non chiamiamo handleDisconnect qui, lasciamo che lo faccia l'evento 'close'
     });
 
     bot.on('close', () => {
@@ -77,21 +71,22 @@ function connect() {
     });
 
   } catch (err) {
-    console.log("⚠️ Errore fatale creazione client:", err.message);
+    console.log("⚠️ Errore creazione client:", err.message);
     isConnecting = false;
     handleDisconnect();
   }
 }
 
 // ======================
-// RECONNECT
+// GESTIONE RICONNESSIONE
 // ======================
 function handleDisconnect() {
   cleanupAll();
 
   if (reconnectTimeout) return;
 
-  console.log("🔄 Riconnessione tra 10 secondi...");
+  // 10 secondi di attesa per permettere ad Aternos/Railway di pulire la vecchia sessione
+  console.log("🔄 Riprovo tra 10 secondi...");
   reconnectTimeout = setTimeout(() => {
     reconnectTimeout = null;
     connect();
@@ -99,36 +94,36 @@ function handleDisconnect() {
 }
 
 // ======================
-// WATCHDOG (CONTROLLO OGNI 20 SECONDI)
+// WATCHDOG (CONTROLLO OGNI 30S)
 // ======================
 setInterval(() => {
   const now = Date.now();
 
-  // Se il bot è "perso" nel limbo (non connette, non è connesso, non ha timer)
-  if (!isConnected && !isConnecting && !reconnectTimeout) {
-    console.log("🔍 Watchdog: Stato inconsistente rilevato, forzo connect.");
+  // Se sta connettendo o attendendo il reconnect, il watchdog sta fermo
+  if (isConnecting || reconnectTimeout) return;
+
+  // 1. Se il bot non è connesso, lo riavvia
+  if (!isConnected) {
+    console.log("🔍 Watchdog: Bot non rilevato, forzo avvio.");
     connect();
+    return;
   }
 
-  // Se è connesso ma il server non risponde (Freeze)
-  if (isConnected && (now - lastPacketTime > 60000)) {
-    console.log("❄️ Watchdog: Server freezato, riavvio...");
+  // 2. Se è connesso ma non arrivano pacchetti da 90 secondi (Server lag/crash)
+  if (isConnected && (now - lastPacketTime > 90000)) {
+    console.log("❄️ Watchdog: Timeout pacchetti (90s), riavvio forzato.");
     handleDisconnect();
   }
-}, 20000);
+}, 30000);
 
 // ======================
-// PULIZIA MANIACALE
+// PULIZIA RISORSE
 // ======================
 function cleanupBot() {
+  if (loginTimer) clearTimeout(loginTimer);
   if (bot) {
-    // Rimuove tutti gli event listener per evitare che vecchi eventi 
-    // scatenino doppie riconnessioni
     bot.removeAllListeners();
-    try {
-      bot.close(); 
-      bot.terminate(); // Se disponibile nella versione della lib
-    } catch(e) {}
+    try { bot.close(); } catch(e) {}
     bot = null;
   }
 }
@@ -136,12 +131,12 @@ function cleanupBot() {
 function cleanupAll() {
   stopAntiAFK();
   isConnected = false;
-  isConnecting = false; // Reset fondamentale
+  isConnecting = false;
   cleanupBot();
 }
 
 // ======================
-// ANTI AFK
+// LOGICA ANTI-AFK
 // ======================
 function startAntiAFK() {
   if (afkInterval) return;
@@ -151,8 +146,9 @@ function startAntiAFK() {
 
     try {
       tick++;
-      yaw = (yaw + 20) % 360;
+      yaw = (yaw + 15) % 360;
 
+      // Invio pacchetto input
       bot.queue('player_auth_input', {
         pitch: 0,
         yaw: yaw,
@@ -166,7 +162,16 @@ function startAntiAFK() {
         tick: tick,
         delta: { x: 0, y: 0, z: 0 }
       });
-    } catch (e) {}
+
+      // Simula braccio
+      bot.queue('animate', {
+        action_id: 1, 
+        runtime_entity_id: 1n 
+      });
+
+    } catch (e) {
+      console.log("⚠️ Errore invio pacchetto Anti-AFK");
+    }
   }, 30000);
 }
 
@@ -177,4 +182,5 @@ function stopAntiAFK() {
   }
 }
 
+// START
 connect();
