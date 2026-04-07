@@ -1,232 +1,90 @@
 const bedrock = require('bedrock-protocol');
 
-const HOST = 'RustedSurvival.aternos.me';
-const PORT = 58137;
-const USERNAME = 'MobileBot';
+// Configurazione del server
+const serverIP = 'IL_TUO_IP_DI_ATERNOS.aternos.me'; // Es: mioserver.aternos.me
+const serverPort = 19132;                           // La porta di Aternos per Bedrock
+const botUsername = 'BotAFK';
 
-let bot = null;
-let afkTimeout = null;
-let reconnectTimeout = null;
+function startBot() {
+    console.log("⏳ Connessione al server Aternos in corso...");
 
-let isConnected = false;
-let isConnecting = false;
-let lastPacketTime = Date.now();
-let tick = 0n;
-
-let pos = { x: 0, y: 100, z: 0 };
-let yaw = 0;
-let entityId = 0n;
-
-// ======================
-// CONNESSIONE
-// ======================
-function connect() {
-  if (isConnected) return;
-  if (isConnecting && (Date.now() - lastPacketTime < 30000)) return;
-
-  isConnecting = true;
-  lastPacketTime = Date.now();
-  console.log(`🔌 [${new Date().toLocaleTimeString()}] Connessione...`);
-
-  cleanupBot();
-
-  try {
-    bot = bedrock.createClient({
-      host: 'RustedSurvival.aternos.me',
-      port: 58137,
-      username: BotAfk,
-      offline: true,
-      version: '1.26.13', // 🔥 sempre aggiornato
-      connectTimeout: 20000
+    const client = bedrock.createClient({
+        host: 'RustedSurvival.aternos.me',
+        port: 58137,
+        username: BotAFK,
+        // IMPORTANTE: Imposta 'offline: true' se nelle opzioni di Aternos
+        // hai attivato "Cracked" (ovvero non richiede l'account Xbox/Microsoft).
+        // Se invece richiede l'accesso ufficiale, lascialo a 'false'.
+        offline: false 
     });
 
-    // ======================
-    // DATI INIZIALI
-    // ======================
-    bot.on('start_game', (packet) => {
-      if (packet.player_position) {
-        pos = packet.player_position;
-      }
-      entityId = packet.runtime_entity_id;
+    let runtimeId = 0n; // ID univoco del bot nel server
+    let position = { x: 0, y: 0, z: 0 };
+    let afkInterval;
 
-      // 🔥 PACCHETTI IMPORTANTI (fix kick)
-      bot.queue('client_cache_status', { enabled: false });
-      bot.queue('request_chunk_radius', { radius: 8, max_radius: 8 });
+    // Evento: Il bot entra in gioco e il server gli invia i dati iniziali
+    client.on('start_game', (packet) => {
+        runtimeId = packet.runtime_id;
+        position = packet.player_position;
+        console.log("✅ Bot spawnato nel server con successo!");
+
+        let yaw = 0;
+        
+        // Loop Anti-AFK: Si attiva ogni 30 secondi
+        afkInterval = setInterval(() => {
+            yaw = (yaw + 15) % 360; // Ruota la testa del bot di 15 gradi
+            
+            // 1. Inviamo un pacchetto di movimento (rotazione della visuale)
+            client.write('move_player', {
+                runtime_id: runtimeId,
+                position: position,
+                pitch: 0,
+                yaw: yaw,
+                head_yaw: yaw,
+                mode: 'normal',
+                on_ground: true,
+                ridden_runtime_id: 0n,
+                teleport: { cause: 'unknown', source_entity_type: 0 },
+                tick: 0n
+            });
+
+            // 2. Facciamo oscillare il braccio al bot (clic sinistro)
+            client.write('animate', {
+                action_id: 'swing_arm',
+                runtime_id: runtimeId
+            });
+
+        }, 30000); 
     });
 
-    bot.on('move_player', (packet) => {
-      if (packet.runtime_id === entityId && packet.position) {
-        pos = packet.position;
-      }
+    // Se il server sposta il bot (es. acqua o spinta), aggiorniamo la nostra posizione 
+    // per non mandare pacchetti errati e farci kickare per "movimento anomalo"
+    client.on('move_player', (packet) => {
+        if (packet.runtime_id === runtimeId) {
+            position = packet.position;
+        }
     });
 
-    // ======================
-    // SPAWN
-    // ======================
-    bot.on('spawn', () => {
-      console.log("📨 Spawnato!");
-
-      isConnected = true;
-      isConnecting = false;
-      lastPacketTime = Date.now();
-
-      // ⏱️ Ritardo anti-kick
-      setTimeout(() => {
-        console.log("🚀 Avvio Anti-AFK...");
-        startAntiAFK();
-      }, 2000);
+    // Evento: Messaggio di kick o disconnessione
+    client.on('disconnect', (packet) => {
+        console.log(`⚠️ Kickato o disconnesso: ${packet.message}`);
     });
 
-    bot.on('packet', () => {
-      lastPacketTime = Date.now();
+    // Evento: Il server si è spento o la connessione è caduta
+    client.on('close', () => {
+        console.log("❌ Connessione terminata. Riavvio automatico tra 1 minuto...");
+        clearInterval(afkInterval); // Ferma il loop anti-AFK
+        
+        // Riprova a connettersi dopo 60 secondi
+        setTimeout(() => {
+            startBot();
+        }, 60000);
     });
 
-    // ======================
-    // DEBUG KICK (IMPORTANTISSIMO)
-    // ======================
-    bot.on('disconnect', (packet) => {
-      console.log("🚪 DISCONNECT DEBUG:");
-      console.log(packet);
+    client.on('error', (err) => {
+        console.error("❌ Errore di connessione:", err);
     });
-
-    bot.on('error', (err) => {
-      console.log("⚠️ Errore:", err.message);
-      handleDisconnect();
-    });
-
-    bot.on('close', () => {
-      console.log("❌ Connessione chiusa.");
-      handleDisconnect();
-    });
-
-  } catch (err) {
-    handleDisconnect();
-  }
 }
 
-// ======================
-// RICONNESSIONE
-// ======================
-function handleDisconnect() {
-  cleanupAll();
-
-  if (reconnectTimeout) return;
-
-  console.log("🔄 Riprovo tra 10 secondi...");
-  reconnectTimeout = setTimeout(() => {
-    reconnectTimeout = null;
-    connect();
-  }, 10000);
-}
-
-// ======================
-// WATCHDOG (TENUTO)
-// ======================
-setInterval(() => {
-  const now = Date.now();
-
-  if (isConnected && (now - lastPacketTime > 120000)) {
-    console.log("❄️ Timeout Watchdog → riavvio...");
-    handleDisconnect();
-    return;
-  }
-
-  if (!isConnected && !reconnectTimeout) {
-    isConnecting = false;
-    connect();
-  }
-
-}, 15000);
-
-// ======================
-// PULIZIA
-// ======================
-function cleanupBot() {
-  if (bot) {
-    bot.removeAllListeners();
-    try { bot.close(); } catch(e) {}
-    bot = null;
-  }
-}
-
-function cleanupAll() {
-  stopAntiAFK();
-  isConnected = false;
-  isConnecting = false;
-  cleanupBot();
-}
-
-// ======================
-// ANTI-AFK AVANZATO
-// ======================
-function startAntiAFK() {
-  stopAntiAFK();
-
-  const sendMovement = () => {
-    if (!isConnected || !bot) return;
-
-    try {
-      tick++;
-
-      // Rotazione casuale
-      yaw += (Math.random() * 60 - 30);
-
-      const rand = () => (Math.random() - 0.5) * 0.2;
-
-      bot.queue('player_auth_input', {
-        pitch: 0,
-        yaw: yaw,
-        head_yaw: yaw,
-        position: {
-          x: pos.x || 0,
-          y: pos.y || 100,
-          z: pos.z || 0
-        },
-        move_vector: { x: rand(), z: rand() },
-        analog_move_vector: { x: rand(), z: rand() },
-        input_data: 0n,
-        input_mode: 'mouse',
-        play_mode: 'screen',
-        interaction_model: 'touch',
-        tick: tick,
-        delta: { x: 0, y: 0, z: 0 }
-      });
-
-      // Azioni casuali
-      if (entityId !== 0n && Math.random() < 0.5) {
-        bot.queue('animate', {
-          action_id: 1,
-          runtime_entity_id: entityId
-        });
-      }
-
-      console.log("🟢 Anti-AFK inviato");
-
-    } catch (e) {}
-  };
-
-  // Primo invio immediato
-  sendMovement();
-
-  // Loop variabile
-  function scheduleNext() {
-    const delay = 15000 + Math.random() * 15000;
-
-    afkTimeout = setTimeout(() => {
-      sendMovement();
-      scheduleNext();
-    }, delay);
-  }
-
-  scheduleNext();
-}
-
-function stopAntiAFK() {
-  if (afkTimeout) {
-    clearTimeout(afkTimeout);
-    afkTimeout = null;
-  }
-}
-
-// ======================
-connect();
+// Avvio del bot
+startBot();
