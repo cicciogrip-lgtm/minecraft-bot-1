@@ -1,98 +1,117 @@
 const bedrock = require('bedrock-protocol');
 
-const serverIP = 'RustedSurvival.aternos.me';
-const serverPort = 58137; 
-const botUsername = 'BotAFK_Rusted';
+const serverIP = 'RustedSurvival.aternos.me'; const serverPort = 58137; const botUsername = 'BotAFK_Rusted';
 
-let isConnected = false;
-let isConnecting = false; // Novità: previene i doppi tentativi durante la fase di "join"
-let afkInterval = null;
+let isConnected = false; let isConnecting = false; let afkInterval = null; let retryCount = 0; const MAX_RETRIES = 50;
 
-function startBot() {
-    // Se il bot è già connesso o sta già caricando per entrare, blocca la funzione
-    if (isConnected || isConnecting) {
-        return; 
-    }
+function log(msg) { console.log([${new Date().toLocaleTimeString()}] ${msg}); }
 
-    isConnecting = true;
-    console.log(`[${new Date().toLocaleTimeString()}] ⏳ Tentativo di connessione in corso...`);
+function startBot() { if (isConnected || isConnecting) return;
 
-    const client = bedrock.createClient({
-        host: serverIP,
-        port: serverPort,
-        username: botUsername,
-        offline: true,
-        connectTimeout: 30000 
-    });
-
-    let isRetrying = false;
-
-    const retry = (reason) => {
-        if (isRetrying) return; 
-        isRetrying = true;
-        isConnecting = false; // Libera il blocco della connessione
-
-        if (isConnected) {
-            console.log(`[${new Date().toLocaleTimeString()}] ⚠️ BOT DISCONNESSO. Motivo: ${reason}`);
-        } else {
-            console.log(`[${new Date().toLocaleTimeString()}] ❌ ERRORE/DISCONNESSIONE. Motivo: ${reason}`);
-        }
-        
-        isConnected = false;
-        if (afkInterval) clearInterval(afkInterval);
-        
-        try {
-            client.removeAllListeners();
-            client.close(); 
-        } catch (e) {
-            // Ignora gli errori di distruzione del client
-        }
-
-        console.log(`[${new Date().toLocaleTimeString()}] 🔄 Riprovo tra 10 secondi...`);
-        
-        setTimeout(() => {
-            startBot();
-        }, 10000);
-    };
-
-    client.on('start_game', (packet) => {
-        isConnected = true;
-        isConnecting = false; // Ha finito di connettersi
-        const runtimeId = packet.runtime_id;
-        
-        console.log(`[${new Date().toLocaleTimeString()}] ✅ Connesso con successo!`);
-
-        afkInterval = setInterval(() => {
-            if (!isConnected) return;
-            
-            try {
-                // FIX DESYNC: Rimosso il pacchetto 'move_player'. 
-                // Ora il bot muove solo il braccio, evitando errori di coordinate o tick errati (tick: 0n).
-                client.write('animate', { action_id: 'swing_arm', runtime_id: runtimeId });
-            } catch (err) {
-                retry('Errore durante invio pacchetti AFK');
-            }
-        }, 30000); // Manda un pugno a vuoto ogni 30 secondi
-    });
-
-    client.on('disconnect', (packet) => {
-        const reason = packet.message || packet.reason || 'Sconosciuto';
-        retry(`Disconnesso dal server: ${reason}`);
-    });
-
-    client.on('kick', (packet) => {
-        const reason = packet.message || packet.reason || 'Sconosciuto';
-        retry(`Kikkato dal server: ${reason}`);
-    });
-
-    client.on('error', (err) => {
-        retry(`Errore di rete: ${err.message}`);
-    });
-
-    client.on('close', () => {
-        retry('Connessione chiusa');
-    });
+if (retryCount >= MAX_RETRIES) {
+    log('❌ Numero massimo di tentativi raggiunto. Stop.');
+    return;
 }
 
-// Avvio
-startBot();
+isConnecting = true;
+retryCount++;
+
+log(`⏳ Connessione in corso... (Tentativo ${retryCount})`);
+
+const client = bedrock.createClient({
+    host: serverIP,
+    port: serverPort,
+    username: botUsername,
+    offline: true,
+    connectTimeout: 30000
+});
+
+let isRetrying = false;
+let runtimeId = null;
+
+const retry = (reason) => {
+    if (isRetrying) return;
+    isRetrying = true;
+
+    isConnected = false;
+    isConnecting = false;
+
+    if (afkInterval) clearInterval(afkInterval);
+
+    log(`⚠️ Disconnessione: ${reason}`);
+
+    try {
+        client.removeAllListeners();
+        client.close();
+    } catch (e) {}
+
+    const delay = Math.min(30000, 10000 + retryCount * 2000);
+    log(`🔄 Riprovo tra ${delay / 1000}s...`);
+
+    setTimeout(startBot, delay);
+};
+
+client.on('start_game', (packet) => {
+    runtimeId = packet.runtime_id;
+    isConnected = true;
+    isConnecting = false;
+    retryCount = 0;
+
+    log('✅ Connesso!');
+
+    startAFK(client, () => runtimeId, retry);
+});
+
+client.on('spawn', (packet) => {
+    if (packet.runtime_id) {
+        runtimeId = packet.runtime_id;
+    }
+});
+
+client.on('disconnect', (p) => retry(p.message || p.reason || 'disconnect'));
+client.on('kick', (p) => retry(p.message || p.reason || 'kick'));
+client.on('error', (e) => retry(e.message));
+client.on('close', () => retry('connessione chiusa'));
+
+}
+
+function startAFK(client, getRuntimeId, retry) { function doAction() { if (!isConnected) return;
+
+const runtimeId = getRuntimeId();
+    if (!runtimeId) return;
+
+    try {
+        // Movimento random (anti-AFK più realistico)
+        client.write('player_auth_input', {
+            pitch: 0,
+            yaw: Math.random() * 360,
+            position: { x: 0, y: 0, z: 0 },
+            move_vector: { x: 0, z: 0 },
+            input_data: ['jumping']
+        });
+
+        // Animazione casuale
+        if (Math.random() > 0.5) {
+            client.write('animate', {
+                action_id: 'swing_arm',
+                runtime_id: runtimeId
+            });
+        }
+
+    } catch (err) {
+        retry('Errore AFK');
+    }
+
+    scheduleNext();
+}
+
+function scheduleNext() {
+    const delay = Math.floor(Math.random() * 20000) + 20000; // 20-40s
+    afkInterval = setTimeout(doAction, delay);
+}
+
+scheduleNext();
+
+}
+
+// Avvio startBot();
