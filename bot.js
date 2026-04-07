@@ -1,6 +1,5 @@
 const bedrock = require('bedrock-protocol');
 
-// Configurazione specifica per il tuo server
 const serverIP = 'RustedSurvival.aternos.me';
 const serverPort = 58137; 
 const botUsername = 'BotAFK_Rusted';
@@ -8,16 +7,20 @@ const botUsername = 'BotAFK_Rusted';
 let isConnected = false;
 
 function startBot() {
-    // Evita di far partire più connessioni contemporaneamente
     if (isConnected) return;
 
-    console.log(`[${new Date().toLocaleTimeString()}] ⏳ Tentativo di connessione a ${serverIP}...`);
+    console.log(`[${new Date().toLocaleTimeString()}] ⏳ Tentativo di connessione...`);
 
     const client = bedrock.createClient({
         host: serverIP,
         port: serverPort,
         username: botUsername,
-        offline: false // Imposta a true se il server Aternos ha l'opzione "Cracked" attiva
+        // SOLUZIONE AUTENTICAZIONE: 
+        // Impostando 'offline' a true, il bot non ti chiederà di accedere a Microsoft/Xbox Live.
+        offline: true, 
+        // SOLUZIONE PING TIMEOUT: 
+        // Aumentiamo il tempo di attesa per la risposta del server
+        connectTimeout: 30000 
     });
 
     let runtimeId = 0n;
@@ -28,17 +31,13 @@ function startBot() {
         isConnected = true;
         runtimeId = packet.runtime_id;
         position = packet.player_position;
-        console.log("✅ Bot connesso e in gioco!");
+        console.log("✅ Connesso! Il server è ora attivo grazie al bot.");
 
         let yaw = 0;
-        
-        // Loop Anti-AFK (ogni 30 secondi)
         afkInterval = setInterval(() => {
             if (!isConnected) return;
-            
             yaw = (yaw + 30) % 360;
             
-            // Movimento visuale
             client.write('move_player', {
                 runtime_id: runtimeId,
                 position: position,
@@ -52,42 +51,26 @@ function startBot() {
                 tick: 0n
             });
 
-            // Animazione braccio
-            client.write('animate', {
-                action_id: 'swing_arm',
-                runtime_id: runtimeId
-            });
+            client.write('animate', { action_id: 'swing_arm', runtime_id: runtimeId });
         }, 30000); 
     });
 
-    // Aggiorna posizione se il server lo sposta
-    client.on('move_player', (packet) => {
-        if (packet.runtime_id === runtimeId) {
-            position = packet.position;
-        }
-    });
-
-    // Gestione Errori
+    // Gestione errori (incluso il Ping Timed Out)
     client.on('error', (err) => {
-        console.error(`❌ Errore rilevato: ${err.message}`);
+        console.error(`❌ Errore: ${err.message}`);
+        // Se il server è offline o in timeout, forziamo la chiusura per resettare
         isConnected = false;
+        client.close(); 
     });
 
-    // Gestione Chiusura/Disconnessione
     client.on('close', () => {
-        if (isConnected) {
-            console.log("⚠️ Connessione persa.");
-            isConnected = false;
-        }
-        
+        isConnected = false;
         clearInterval(afkInterval);
-
-        console.log("🔄 Riprovo tra 10 secondi...");
-        setTimeout(() => {
-            startBot();
-        }, 10000); // 10 secondi di attesa
+        console.log("🔄 Server non raggiungibile o connessione persa. Riprovo tra 10 secondi...");
+        
+        // Riprova sempre, indipendentemente dal tipo di errore
+        setTimeout(startBot, 10000);
     });
 }
 
-// Avvio iniziale
 startBot();
