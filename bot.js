@@ -54,7 +54,7 @@ function connect() {
 
     // NESSUNA ATTESA: Appena spawna, parte.
     bot.on('spawn', () => {
-      console.log("✅Bot online");
+      console.log("📨 Spawnato! Avvio input immediato...");
       isConnected = true;
       isConnecting = false;
       lastPacketTime = Date.now();
