@@ -1,40 +1,44 @@
 const bedrock = require('bedrock-protocol');
 
-// Configurazione del server
-const serverIP = 'RustedSurvival.aternos.me'; // Es: mioserver.aternos.me
-const serverPort = 58137;                           // La porta di Aternos per Bedrock
-const botUsername = 'BotAFK';
+// Configurazione specifica per il tuo server
+const serverIP = 'RustedSurvival.aternos.me';
+const serverPort = 58137; 
+const botUsername = 'BotAFK_Rusted';
+
+let isConnected = false;
 
 function startBot() {
-    console.log("⏳ Connessione al server Aternos in corso...");
+    // Evita di far partire più connessioni contemporaneamente
+    if (isConnected) return;
+
+    console.log(`[${new Date().toLocaleTimeString()}] ⏳ Tentativo di connessione a ${serverIP}...`);
 
     const client = bedrock.createClient({
         host: serverIP,
         port: serverPort,
         username: botUsername,
-        // IMPORTANTE: Imposta 'offline: true' se nelle opzioni di Aternos
-        // hai attivato "Cracked" (ovvero non richiede l'account Xbox/Microsoft).
-        // Se invece richiede l'accesso ufficiale, lascialo a 'false'.
-        offline: false 
+        offline: false // Imposta a true se il server Aternos ha l'opzione "Cracked" attiva
     });
 
-    let runtimeId = 0n; // ID univoco del bot nel server
+    let runtimeId = 0n;
     let position = { x: 0, y: 0, z: 0 };
     let afkInterval;
 
-    // Evento: Il bot entra in gioco e il server gli invia i dati iniziali
     client.on('start_game', (packet) => {
+        isConnected = true;
         runtimeId = packet.runtime_id;
         position = packet.player_position;
-        console.log("✅ Bot spawnato nel server con successo!");
+        console.log("✅ Bot connesso e in gioco!");
 
         let yaw = 0;
         
-        // Loop Anti-AFK: Si attiva ogni 30 secondi
+        // Loop Anti-AFK (ogni 30 secondi)
         afkInterval = setInterval(() => {
-            yaw = (yaw + 15) % 360; // Ruota la testa del bot di 15 gradi
+            if (!isConnected) return;
             
-            // 1. Inviamo un pacchetto di movimento (rotazione della visuale)
+            yaw = (yaw + 30) % 360;
+            
+            // Movimento visuale
             client.write('move_player', {
                 runtime_id: runtimeId,
                 position: position,
@@ -48,43 +52,42 @@ function startBot() {
                 tick: 0n
             });
 
-            // 2. Facciamo oscillare il braccio al bot (clic sinistro)
+            // Animazione braccio
             client.write('animate', {
                 action_id: 'swing_arm',
                 runtime_id: runtimeId
             });
-
         }, 30000); 
     });
 
-    // Se il server sposta il bot (es. acqua o spinta), aggiorniamo la nostra posizione 
-    // per non mandare pacchetti errati e farci kickare per "movimento anomalo"
+    // Aggiorna posizione se il server lo sposta
     client.on('move_player', (packet) => {
         if (packet.runtime_id === runtimeId) {
             position = packet.position;
         }
     });
 
-    // Evento: Messaggio di kick o disconnessione
-    client.on('disconnect', (packet) => {
-        console.log(`⚠️ Kickato o disconnesso: ${packet.message}`);
+    // Gestione Errori
+    client.on('error', (err) => {
+        console.error(`❌ Errore rilevato: ${err.message}`);
+        isConnected = false;
     });
 
-    // Evento: Il server si è spento o la connessione è caduta
+    // Gestione Chiusura/Disconnessione
     client.on('close', () => {
-        console.log("❌ Connessione terminata. Riavvio automatico tra 1 minuto...");
-        clearInterval(afkInterval); // Ferma il loop anti-AFK
+        if (isConnected) {
+            console.log("⚠️ Connessione persa.");
+            isConnected = false;
+        }
         
-        // Riprova a connettersi dopo 60 secondi
+        clearInterval(afkInterval);
+
+        console.log("🔄 Riprovo tra 10 secondi...");
         setTimeout(() => {
             startBot();
-        }, 60000);
-    });
-
-    client.on('error', (err) => {
-        console.error("❌ Errore di connessione:", err);
+        }, 10000); // 10 secondi di attesa
     });
 }
 
-// Avvio del bot
+// Avvio iniziale
 startBot();
