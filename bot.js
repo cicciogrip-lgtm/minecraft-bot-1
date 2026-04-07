@@ -14,13 +14,12 @@ let isConnecting = false;
 let lastPacketTime = Date.now();
 let tick = 0n;
 
-// Coordinate di emergenza garantite
 let pos = { x: 0, y: 100, z: 0 }; 
 let yaw = 0;
 let entityId = 0n;
 
 // ======================
-// CONNESSIONE OTTIMIZZATA
+// CONNESSIONE STABILE
 // ======================
 function connect() {
   if (isConnected) return;
@@ -28,7 +27,7 @@ function connect() {
 
   isConnecting = true;
   lastPacketTime = Date.now(); 
-  console.log(`🔌 [${new Date().toLocaleTimeString()}] Avvio login leggero...`);
+  console.log(`🔌 [${new Date().toLocaleTimeString()}] Tentativo di connessione...`);
 
   cleanupBot();
 
@@ -37,7 +36,7 @@ function connect() {
       host: HOST, 
       port: PORT, 
       username: USERNAME,
-      offline: true, 
+      offline: true,
       connectTimeout: 20000 
     });
 
@@ -55,39 +54,37 @@ function connect() {
     });
 
     bot.on('spawn', () => {
-      console.log("📨 Spawnato! Ottimizzazione mappa in corso...");
+      console.log("📨 Entrato nel server. Attesa breve (3s)...");
       
-      // 🚀 OTTIMIZZAZIONE SERVER: Chiediamo solo 1 chunk di distanza
-      // Questo evita che Aternos lagghi per inviare la mappa al bot
-      try {
-        bot.queue('request_chunk_radius', { chunk_radius: 1 });
-      } catch(e) {}
-
       if (loginTimer) clearTimeout(loginTimer);
       
-      // Entrata morbida: diamo ad Aternos 10 secondi per stabilizzare le entità
+      // Attesa abbassata a 3 secondi. Se aspettiamo troppo, Bedrock ci kicka per inattività!
       loginTimer = setTimeout(() => {
-        console.log("✅ Bot Online e Leggero!");
+        console.log("✅ Bot Operativo!");
         isConnected = true;
         isConnecting = false;
         lastPacketTime = Date.now();
         startAntiAFK();
-      }, 10000); 
+      }, 3000); 
     });
 
-    // 🚀 OTTIMIZZAZIONE CPU: Invece di ascoltare 10.000 pacchetti al secondo, 
-    // ascoltiamo solo il pacchetto dell'ora solare (inviato 1 volta al secondo)
-    bot.on('update_time', () => { 
+    // Ascoltiamo di nuovo i pacchetti normali per non far scattare il timeout
+    bot.on('packet', () => { 
       lastPacketTime = Date.now(); 
     });
 
+    // RILEVATORE DI KICK: Questo ci dirà PERCHÉ Aternos lo butta fuori
+    bot.on('disconnect', (packet) => {
+      console.log(`🚪 KICK DAL SERVER! Motivo: ${packet.hide_disconnect_reason ? 'Nascosto' : packet.message}`);
+    });
+
     bot.on('error', (err) => { 
-      console.log("⚠️ Errore:", err.message); 
+      console.log("⚠️ Errore Client:", err.message); 
       handleDisconnect(); 
     });
     
     bot.on('close', () => { 
-      console.log("❌ Disconnesso."); 
+      console.log("❌ Connessione terminata."); 
       handleDisconnect(); 
     });
 
@@ -97,11 +94,12 @@ function connect() {
 }
 
 // ======================
-// GESTIONE DISCONNESSIONI
+// GESTIONE RICONNESSIONE
 // ======================
 function handleDisconnect() {
   cleanupAll();
   if (reconnectTimeout) return;
+  console.log("🔄 Riprovo tra 10 secondi...");
   reconnectTimeout = setTimeout(() => {
     reconnectTimeout = null;
     connect();
@@ -109,13 +107,13 @@ function handleDisconnect() {
 }
 
 // ======================
-// WATCHDOG INTELLIGENTE
+// WATCHDOG
 // ======================
 setInterval(() => {
   const now = Date.now();
   
   if (isConnected && (now - lastPacketTime > 60000)) {
-    console.log("❄️ Rilevato lag estremo/freeze, riavvio la sessione...");
+    console.log("❄️ Watchdog: Timeout, riavvio...");
     handleDisconnect();
     return;
   }
@@ -127,7 +125,7 @@ setInterval(() => {
 }, 15000);
 
 // ======================
-// PULIZIA RISORSE (Previene memory leak)
+// PULIZIA RISORSE
 // ======================
 function cleanupBot() {
   if (loginTimer) clearTimeout(loginTimer);
@@ -146,7 +144,7 @@ function cleanupAll() {
 }
 
 // ======================
-// ANTI-AFK LEGGERO
+// ANTI-AFK 
 // ======================
 function startAntiAFK() {
   if (afkInterval) clearInterval(afkInterval);
@@ -156,7 +154,7 @@ function startAntiAFK() {
 
     try {
       tick++;
-      yaw = (yaw + 45) % 360; // Gira in modo più deciso ma meno spesso
+      yaw = (yaw + 30) % 360; 
 
       bot.queue('player_auth_input', {
         pitch: 0,
@@ -173,14 +171,13 @@ function startAntiAFK() {
         delta: { x: 0, y: 0, z: 0 }
       });
 
-      // Il braccio si muove solo se c'è un ID valido
       if (entityId !== 0n) {
         bot.queue('animate', { action_id: 1, runtime_entity_id: entityId });
       }
     } catch (e) {
-      // Silenzioso in caso di fallimento per non spammare log
+       // ignora errori minori per non crashare
     }
-  }, 35000); // Intervallo allungato a 35s per alleggerire ulteriormente il server
+  }, 20000); // 20 secondi è il tempo standard
 }
 
 function stopAntiAFK() {
