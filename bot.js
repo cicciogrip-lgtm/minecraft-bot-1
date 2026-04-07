@@ -162,9 +162,7 @@ function startAntiAFK() {
         bot.queue('animate', { action_id: 1, runtime_entity_id: entityId });
       }
       console.log("🟢 Anti-AFK OK");
-    } catch (e) {
-      console.log("⚠️ Salto pacchetto AFK per sicurezza.");
-    }
+    } catch (e) 
   }, 30000);
 }
 
