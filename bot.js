@@ -7,7 +7,6 @@ const USERNAME = 'MobileBot';
 let bot = null;
 let afkInterval = null;
 let reconnectTimeout = null;
-let loginTimer = null; 
 
 let isConnected = false;    
 let isConnecting = false;   
@@ -19,7 +18,7 @@ let yaw = 0;
 let entityId = 0n;
 
 // ======================
-// CONNESSIONE STABILE
+// CONNESSIONE ZERO-DELAY
 // ======================
 function connect() {
   if (isConnected) return;
@@ -27,7 +26,7 @@ function connect() {
 
   isConnecting = true;
   lastPacketTime = Date.now(); 
-  console.log(`🔌 [${new Date().toLocaleTimeString()}] Tentativo di connessione...`);
+  console.log(`🔌 [${new Date().toLocaleTimeString()}] Connessione in corso...`);
 
   cleanupBot();
 
@@ -53,29 +52,21 @@ function connect() {
       }
     });
 
+    // NESSUNA ATTESA: Appena spawna, parte.
     bot.on('spawn', () => {
-      console.log("📨 Entrato nel server. Attesa breve (3s)...");
-      
-      if (loginTimer) clearTimeout(loginTimer);
-      
-      // Attesa abbassata a 3 secondi. Se aspettiamo troppo, Bedrock ci kicka per inattività!
-      loginTimer = setTimeout(() => {
-        console.log("✅ Bot Operativo!");
-        isConnected = true;
-        isConnecting = false;
-        lastPacketTime = Date.now();
-        startAntiAFK();
-      }, 3000); 
+      console.log("📨 Spawnato! Avvio input immediato...");
+      isConnected = true;
+      isConnecting = false;
+      lastPacketTime = Date.now();
+      startAntiAFK(); 
     });
 
-    // Ascoltiamo di nuovo i pacchetti normali per non far scattare il timeout
     bot.on('packet', () => { 
       lastPacketTime = Date.now(); 
     });
 
-    // RILEVATORE DI KICK: Questo ci dirà PERCHÉ Aternos lo butta fuori
     bot.on('disconnect', (packet) => {
-      console.log(`🚪 KICK DAL SERVER! Motivo: ${packet.hide_disconnect_reason ? 'Nascosto' : packet.message}`);
+      console.log(`🚪 KICK DAL SERVER! Motivo: ${packet.hide_disconnect_reason ? 'Sconosciuto/Nascosto' : packet.message}`);
     });
 
     bot.on('error', (err) => { 
@@ -113,7 +104,7 @@ setInterval(() => {
   const now = Date.now();
   
   if (isConnected && (now - lastPacketTime > 60000)) {
-    console.log("❄️ Watchdog: Timeout, riavvio...");
+    console.log("❄️ Timeout rilevato dal Watchdog, riavvio...");
     handleDisconnect();
     return;
   }
@@ -125,10 +116,9 @@ setInterval(() => {
 }, 15000);
 
 // ======================
-// PULIZIA RISORSE
+// PULIZIA
 // ======================
 function cleanupBot() {
-  if (loginTimer) clearTimeout(loginTimer);
   if (bot) {
     bot.removeAllListeners();
     try { bot.close(); } catch(e) {}
@@ -144,12 +134,13 @@ function cleanupAll() {
 }
 
 // ======================
-// ANTI-AFK 
+// ANTI-AFK ISTANTANEO
 // ======================
 function startAntiAFK() {
   if (afkInterval) clearInterval(afkInterval);
 
-  afkInterval = setInterval(() => {
+  // Creiamo una funzione per il movimento così possiamo chiamarla SUBITO
+  const sendMovement = () => {
     if (!isConnected || !bot) return;
 
     try {
@@ -174,10 +165,17 @@ function startAntiAFK() {
       if (entityId !== 0n) {
         bot.queue('animate', { action_id: 1, runtime_entity_id: entityId });
       }
+      console.log("🟢 Input inviato");
     } catch (e) {
-       // ignora errori minori per non crashare
+       // ignora errori minori
     }
-  }, 20000); // 20 secondi è il tempo standard
+  };
+
+  // Esegue il primissimo movimento SUBITO (0 millisecondi di ritardo)
+  sendMovement();
+
+  // Poi imposta il timer ogni 20 secondi
+  afkInterval = setInterval(sendMovement, 20000); 
 }
 
 function stopAntiAFK() {
