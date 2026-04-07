@@ -163,7 +163,7 @@ function startAntiAFK() {
       }
       console.log("🟢 Anti-AFK OK");
     } catch (e) 
-  , 30000);
+   30000);
 }
 
 function stopAntiAFK() {
