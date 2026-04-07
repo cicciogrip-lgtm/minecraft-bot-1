@@ -8,12 +8,12 @@ let bot = null;
 let afkTimeout = null;
 let reconnectTimeout = null;
 
-let isConnected = false;    
-let isConnecting = false;   
+let isConnected = false;
+let isConnecting = false;
 let lastPacketTime = Date.now();
 let tick = 0n;
 
-let pos = { x: 0, y: 100, z: 0 }; 
+let pos = { x: 0, y: 100, z: 0 };
 let yaw = 0;
 let entityId = 0n;
 
@@ -25,8 +25,8 @@ function connect() {
   if (isConnecting && (Date.now() - lastPacketTime < 30000)) return;
 
   isConnecting = true;
-  lastPacketTime = Date.now(); 
-  console.log(`🔌 [${new Date().toLocaleTimeString()}] Connessione in corso...`);
+  lastPacketTime = Date.now();
+  console.log(`🔌 [${new Date().toLocaleTimeString()}] Connessione...`);
 
   cleanupBot();
 
@@ -36,14 +36,22 @@ function connect() {
       port: PORT,
       username: USERNAME,
       offline: true,
+      version: 'latest', // 🔥 sempre aggiornato
       connectTimeout: 20000
     });
 
+    // ======================
+    // DATI INIZIALI
+    // ======================
     bot.on('start_game', (packet) => {
-      if (packet.player_position && typeof packet.player_position.x === 'number') {
+      if (packet.player_position) {
         pos = packet.player_position;
       }
       entityId = packet.runtime_entity_id;
+
+      // 🔥 PACCHETTI IMPORTANTI (fix kick)
+      bot.queue('client_cache_status', { enabled: false });
+      bot.queue('request_chunk_radius', { radius: 8, max_radius: 8 });
     });
 
     bot.on('move_player', (packet) => {
@@ -52,20 +60,33 @@ function connect() {
       }
     });
 
+    // ======================
+    // SPAWN
+    // ======================
     bot.on('spawn', () => {
-      console.log("📨 Spawnato! Avvio Anti-AFK...");
+      console.log("📨 Spawnato!");
+
       isConnected = true;
       isConnecting = false;
       lastPacketTime = Date.now();
-      startAntiAFK();
+
+      // ⏱️ Ritardo anti-kick
+      setTimeout(() => {
+        console.log("🚀 Avvio Anti-AFK...");
+        startAntiAFK();
+      }, 2000);
     });
 
     bot.on('packet', () => {
       lastPacketTime = Date.now();
     });
 
+    // ======================
+    // DEBUG KICK (IMPORTANTISSIMO)
+    // ======================
     bot.on('disconnect', (packet) => {
-      console.log(`🚪 KICK: ${packet.hide_disconnect_reason ? 'Nascosto' : packet.message}`);
+      console.log("🚪 DISCONNECT DEBUG:");
+      console.log(packet);
     });
 
     bot.on('error', (err) => {
@@ -91,7 +112,7 @@ function handleDisconnect() {
 
   if (reconnectTimeout) return;
 
-  console.log("🔄 Riconnessione tra 10s...");
+  console.log("🔄 Riprovo tra 10 secondi...");
   reconnectTimeout = setTimeout(() => {
     reconnectTimeout = null;
     connect();
@@ -99,7 +120,7 @@ function handleDisconnect() {
 }
 
 // ======================
-// WATCHDOG (MANTENUTO)
+// WATCHDOG (TENUTO)
 // ======================
 setInterval(() => {
   const now = Date.now();
@@ -147,7 +168,7 @@ function startAntiAFK() {
     try {
       tick++;
 
-      // Rotazione casuale (più umana)
+      // Rotazione casuale
       yaw += (Math.random() * 60 - 30);
 
       const rand = () => (Math.random() - 0.5) * 0.2;
@@ -171,22 +192,23 @@ function startAntiAFK() {
         delta: { x: 0, y: 0, z: 0 }
       });
 
-      // Azioni casuali "umane"
-      if (entityId !== 0n) {
-        if (Math.random() < 0.5) {
-          bot.queue('animate', { action_id: 1, runtime_entity_id: entityId });
-        }
+      // Azioni casuali
+      if (entityId !== 0n && Math.random() < 0.5) {
+        bot.queue('animate', {
+          action_id: 1,
+          runtime_entity_id: entityId
+        });
       }
 
-      console.log("🟢 Azione Anti-AFK");
+      console.log("🟢 Anti-AFK inviato");
 
     } catch (e) {}
   };
 
-  // Primo movimento immediato
+  // Primo invio immediato
   sendMovement();
 
-  // Scheduling variabile (anti detection)
+  // Loop variabile
   function scheduleNext() {
     const delay = 15000 + Math.random() * 15000;
 
