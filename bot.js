@@ -1,17 +1,17 @@
 const bedrock = require('bedrock-protocol');
 
 // Configurazione del server
-const serverIP = 'IL_TUO_IP_DI_ATERNOS.aternos.me'; // Es: mioserver.aternos.me
-const serverPort = 19132;                           // La porta di Aternos per Bedrock
+const serverIP = 'RustedSurvival.aternos.me'; // Es: mioserver.aternos.me
+const serverPort = 58137;                           // La porta di Aternos per Bedrock
 const botUsername = 'BotAFK';
 
 function startBot() {
     console.log("⏳ Connessione al server Aternos in corso...");
 
     const client = bedrock.createClient({
-        host: 'RustedSurvival.aternos.me',
-        port: 58137,
-        username: BotAFK,
+        host: serverIP,
+        port: serverPort,
+        username: botUsername,
         // IMPORTANTE: Imposta 'offline: true' se nelle opzioni di Aternos
         // hai attivato "Cracked" (ovvero non richiede l'account Xbox/Microsoft).
         // Se invece richiede l'accesso ufficiale, lascialo a 'false'.
