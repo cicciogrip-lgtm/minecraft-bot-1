@@ -8,8 +8,6 @@ let isConnected = false;
 let afkInterval = null;
 
 function startBot() {
-    if (isConnected) return;
-
     console.log(`[${new Date().toLocaleTimeString()}] ⏳ Tentativo di connessione...`);
 
     const client = bedrock.createClient({
@@ -20,21 +18,33 @@ function startBot() {
         connectTimeout: 30000 
     });
 
+    // Variabile di controllo per evitare di chiamare retry() più volte nello stesso ciclo
+    let isRetrying = false;
+
     // Funzione centralizzata per gestire la riconnessione
-    const retry = () => {
+    const retry = (reason) => {
+        if (isRetrying) return; // Se stiamo già riprovando, ignora le altre chiamate
+        isRetrying = true;
+
         if (isConnected) {
-            console.log(`[${new Date().toLocaleTimeString()}] ⚠️ BOT DISCONNESSO.`);
+            console.log(`[${new Date().toLocaleTimeString()}] ⚠️ BOT DISCONNESSO. Motivo: ${reason}`);
+        } else {
+            console.log(`[${new Date().toLocaleTimeString()}] ❌ ERRORE/DISCONNESSIONE. Motivo: ${reason}`);
         }
         
         isConnected = false;
         if (afkInterval) clearInterval(afkInterval);
         
-        // Rimuove tutti i listener per evitare perdite di memoria
-        client.removeAllListeners();
+        try {
+            client.removeAllListeners();
+            client.close(); // Forziamo la chiusura per pulire la memoria
+        } catch (e) {
+            // Ignoriamo eventuali errori di chiusura se il client è già distrutto
+        }
 
-        console.log(`[${new Date().toLocaleTimeString()}] 🔄 Riprovo tra 10 secondi (Loop infinito)...`);
+        console.log(`[${new Date().toLocaleTimeString()}] 🔄 Riprovo tra 10 secondi...`);
         
-        // Forza il riavvio tra 10 secondi
+        // Forza il riavvio tra 10 secondi esatti, solo 1 volta per disconnessione
         setTimeout(() => {
             startBot();
         }, 10000);
@@ -57,35 +67,43 @@ function startBot() {
             if (!isConnected) return;
             yaw = (yaw + 30) % 360;
             
-            client.write('move_player', {
-                runtime_id: runtimeId,
-                position: position,
-                pitch: 0,
-                yaw: yaw, head_yaw: yaw,
-                mode: 'normal', on_ground: true,
-                ridden_runtime_id: 0n, teleport: { cause: 'unknown', source_entity_type: 0 },
-                tick: 0n
-            });
-            client.write('animate', { action_id: 'swing_arm', runtime_id: runtimeId });
+            try {
+                client.write('move_player', {
+                    runtime_id: runtimeId,
+                    position: position,
+                    pitch: 0,
+                    yaw: yaw, head_yaw: yaw,
+                    mode: 'normal', on_ground: true,
+                    ridden_runtime_id: 0n, teleport: { cause: 'unknown', source_entity_type: 0 },
+                    tick: 0n
+                });
+                client.write('animate', { action_id: 'swing_arm', runtime_id: runtimeId });
+            } catch (err) {
+                // Se c'è un errore nell'invio del pacchetto AFK, avvia il riavvio
+                retry('Errore durante invio pacchetti AFK (Timeout/Desync)');
+            }
         }, 30000);
     });
 
-    // FIX: Se c'è un errore di rete, chiama subito la funzione di retry
-    client.on('error', (err) => {
-        console.log(`[${new Date().toLocaleTimeString()}] ❌ Errore di rete: ${err.message}`);
-        // Chiudiamo il client manualmente per scatenare la pulizia se non avviene da sola
-        client.close();
+    // Gestione specifica per le disconnessioni inviate dal server (es. riavvii, kick)
+    client.on('disconnect', (packet) => {
+        const reason = packet.message || packet.reason || 'Sconosciuto';
+        retry(`Disconnesso dal server: ${reason}`);
     });
 
-    // FIX: Se la connessione si chiude per qualsiasi motivo
+    client.on('kick', (packet) => {
+        const reason = packet.message || packet.reason || 'Sconosciuto';
+        retry(`Kikkato dal server: ${reason}`);
+    });
+
+    // Gestione per errori di rete (come il Ping Timed Out)
+    client.on('error', (err) => {
+        retry(`Errore di rete: ${err.message}`);
+    });
+
+    // Se la connessione si chiude per motivi generici non catturati sopra
     client.on('close', () => {
-        // Usiamo un controllo per evitare di chiamare retry() due volte (sia da error che da close)
-        if (isConnected || client.state === 'failed' || client.status === 'disconnected') {
-            retry();
-        } else {
-            // Se non era ancora connesso (es. errore immediato), riprova comunque
-            retry();
-        }
+        retry('Connessione chiusa');
     });
 }
 
