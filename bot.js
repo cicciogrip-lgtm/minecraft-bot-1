@@ -2,7 +2,7 @@ const bedrock = require('bedrock-protocol');
 
 const serverIP = 'RustedSurvival.aternos.me'; const serverPort = 58137; const botUsername = 'BotAFK_Rusted';
 
-let isConnected = false; let isConnecting = false; let afkInterval = null; let retryCount = 0; const MAX_RETRIES = 50;
+let isConnected = false; let isConnecting = false; let afkTimeout = null; let retryCount = 0; const MAX_RETRIES = 50;
 
 function log(msg) { console.log([${new Date().toLocaleTimeString()}] ${msg}); }
 
@@ -36,7 +36,7 @@ const retry = (reason) => {
     isConnected = false;
     isConnecting = false;
 
-    if (afkInterval) clearInterval(afkInterval);
+    if (afkTimeout) clearTimeout(afkTimeout);
 
     log(`⚠️ Disconnessione: ${reason}`);
 
@@ -81,7 +81,6 @@ const runtimeId = getRuntimeId();
     if (!runtimeId) return;
 
     try {
-        // Movimento random (anti-AFK più realistico)
         client.write('player_auth_input', {
             pitch: 0,
             yaw: Math.random() * 360,
@@ -90,7 +89,6 @@ const runtimeId = getRuntimeId();
             input_data: ['jumping']
         });
 
-        // Animazione casuale
         if (Math.random() > 0.5) {
             client.write('animate', {
                 action_id: 'swing_arm',
@@ -100,18 +98,19 @@ const runtimeId = getRuntimeId();
 
     } catch (err) {
         retry('Errore AFK');
+        return;
     }
 
     scheduleNext();
 }
 
 function scheduleNext() {
-    const delay = Math.floor(Math.random() * 20000) + 20000; // 20-40s
-    afkInterval = setTimeout(doAction, delay);
+    const delay = Math.floor(Math.random() * 20000) + 20000;
+    afkTimeout = setTimeout(doAction, delay);
 }
 
 scheduleNext();
 
 }
 
-// Avvio startBot();
+startBot();
