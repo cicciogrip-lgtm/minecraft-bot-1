@@ -14,45 +14,45 @@ let isConnecting = false;
 let lastPacketTime = Date.now();
 let tick = 0n;
 
-// Inizializziamo pos con valori numerici sicuri per evitare "undefined"
-let pos = { x: 0, y: 0, z: 0 }; 
+// Inizializziamo SEMPRE con numeri, mai con null o undefined
+let pos = { x: 0, y: 100, z: 0 }; 
 let yaw = 0;
 let entityId = 0n;
 
 function connect() {
   if (isConnected) return;
-  // Se sta connettendo da più di 30s, permettiamo un nuovo tentativo (reset del blocco)
   if (isConnecting && (Date.now() - lastPacketTime < 30000)) return;
 
   isConnecting = true;
   lastPacketTime = Date.now(); 
-  console.log(`🔌 [${new Date().toLocaleTimeString()}] Connessione in corso...`);
+  console.log(`🔌 [${new Date().toLocaleTimeString()}] Connessione...`);
 
   cleanupBot();
 
   try {
     bot = bedrock.createClient({
-      host: HOST,
-      port: PORT,
-      username: USERNAME,
-      offline: true,
-      connectTimeout: 15000 
+      host: HOST, port: PORT, username: USERNAME,
+      offline: true, connectTimeout: 20000 
     });
 
     bot.on('start_game', (packet) => {
-      // Salviamo la posizione solo se il pacchetto la contiene davvero
-      if (packet.player_position && typeof packet.player_position.x !== 'undefined') {
-        pos = packet.player_position;
+      // Se il pacchetto ha dati, usali, altrimenti tieni quelli di default
+      if (packet.player_position && typeof packet.player_position.x === 'number') {
+        pos = { x: packet.player_position.x, y: packet.player_position.y, z: packet.player_position.z };
       }
       entityId = packet.runtime_entity_id; 
     });
 
+    bot.on('move_player', (packet) => {
+      if (packet.runtime_id === entityId && packet.position) {
+        pos = { x: packet.position.x, y: packet.position.y, z: packet.position.z };
+      }
+    });
+
     bot.on('spawn', () => {
-      console.log("📨 Spawn rilevato. Attesa stabilità...");
-      
       if (loginTimer) clearTimeout(loginTimer);
       loginTimer = setTimeout(() => {
-        console.log("✅ Bot ONLINE!");
+        console.log("✅ Bot Online!");
         isConnected = true;
         isConnecting = false;
         lastPacketTime = Date.now();
@@ -61,19 +61,10 @@ function connect() {
     });
 
     bot.on('packet', () => { lastPacketTime = Date.now(); });
-
-    bot.on('error', (err) => { 
-      console.log("⚠️ Errore:", err.message);
-      handleDisconnect(); 
-    });
-
-    bot.on('close', () => {
-      console.log("❌ Connessione chiusa.");
-      handleDisconnect();
-    });
+    bot.on('error', (err) => { console.log("⚠️ Errore:", err.message); handleDisconnect(); });
+    bot.on('close', () => { console.log("❌ Chiuso."); handleDisconnect(); });
 
   } catch (err) {
-    console.log("⚠️ Errore creazione client:", err.message);
     handleDisconnect();
   }
 }
@@ -81,29 +72,16 @@ function connect() {
 function handleDisconnect() {
   cleanupAll();
   if (reconnectTimeout) return;
-  
-  console.log("🔄 Riconnessione tra 10s...");
   reconnectTimeout = setTimeout(() => {
     reconnectTimeout = null;
     connect();
   }, 10000);
 }
 
-// WATCHDOG MIGLIORATO
+// Watchdog che sblocca tutto se il bot si incanta
 setInterval(() => {
-  const now = Date.now();
-
-  // Se il bot è "connesso" ma non arrivano pacchetti da 60s
-  if (isConnected && (now - lastPacketTime > 60000)) {
-    console.log("❄️ Timeout rilevato, riavvio...");
-    handleDisconnect();
-    return;
-  }
-
-  // Se il bot è spento e non sta già aspettando il timer di riconnessione
   if (!isConnected && !reconnectTimeout) {
-    console.log("🔍 Watchdog: Bot offline, forzo riavvio.");
-    isConnecting = false; // Sblocca il lucchetto
+    isConnecting = false; 
     connect();
   }
 }, 15000);
@@ -128,25 +106,21 @@ function startAntiAFK() {
   if (afkInterval) clearInterval(afkInterval);
 
   afkInterval = setInterval(() => {
-    // PROTEZIONE CRITICA PER LA X:
-    // Se pos non è un oggetto o x non esiste, non inviare il pacchetto
-    if (!isConnected || !bot || !pos || typeof pos.x === 'undefined') {
-      console.log("⏳ In attesa di coordinate valide...");
-      return;
-    }
+    if (!isConnected || !bot) return;
 
     try {
       tick++;
-      yaw = (yaw + 20) % 360;
+      yaw = (yaw + 30) % 360;
 
+      // Inviamo il pacchetto con la garanzia che pos.x sia un numero
       bot.queue('player_auth_input', {
         pitch: 0,
         yaw: yaw,
         head_yaw: yaw,
-        position: { 
-            x: Number(pos.x), 
-            y: Number(pos.y), 
-            z: Number(pos.z) 
+        position: {
+            x: pos.x || 0,
+            y: pos.y || 100,
+            z: pos.z || 0
         }, 
         move_vector: { x: 0, z: 0 },
         analog_move_vector: { x: 0, z: 0 },
@@ -161,16 +135,14 @@ function startAntiAFK() {
       if (entityId !== 0n) {
         bot.queue('animate', { action_id: 1, runtime_entity_id: entityId });
       }
-      console.log("🟢 Anti-AFK OK");
-    } catch (e) 
-   30000);
+    } catch (e) {
+      // Se fallisce, non facciamo nulla, il watchdog rileverà il problema se serve
+    }
+  }, 25000);
 }
 
 function stopAntiAFK() {
-  if (afkInterval) {
-    clearInterval(afkInterval);
-    afkInterval = null;
-  }
+  if (afkInterval) { clearInterval(afkInterval); afkInterval = null; }
 }
 
 connect();
