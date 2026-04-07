@@ -32,11 +32,11 @@ function connect() {
 
   try {
     bot = bedrock.createClient({
-      host: HOST,
-      port: PORT,
-      username: USERNAME,
+      host: 'RustedSurvival.aternos.me',
+      port: 58137,
+      username: BotAfk,
       offline: true,
-      version: 'latest', // 🔥 sempre aggiornato
+      version: '1.26.13', // 🔥 sempre aggiornato
       connectTimeout: 20000
     });
 
