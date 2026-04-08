@@ -1,45 +1,46 @@
 const bedrock = require('bedrock-protocol');
 
-// Configurazione server
 const serverIP = 'RustedSurvival.aternos.me';
-const serverPort = 58137; 
+const serverPort = 58137;
 const botUsername = 'BotAFK_Rusted';
 
 let isConnected = false;
-let reconnectTimeout = null;
 
 function startBot() {
-    // Se c'è già un tentativo in corso o è connesso, non fare nulla
-    if (isConnected) return;
-
-    console.log(`[${new Date().toLocaleTimeString()}] ⏳ Tentativo di connessione in corso...`);
+    console.log("⏳ Connessione...");
 
     const client = bedrock.createClient({
         host: serverIP,
         port: serverPort,
         username: botUsername,
-        offline: true,        // Per server Aternos con opzione "Cracked"
-        connectTimeout: 30000 // 30 secondi di pazienza per il ping
+        offline: true
     });
 
     let runtimeId = 0n;
     let position = { x: 0, y: 0, z: 0 };
-    let afkInterval = null;
+    let tick = 0n;
+    let yaw = 0;
 
-    // Quando il bot entra effettivamente nel mondo
     client.on('start_game', (packet) => {
         isConnected = true;
+
         runtimeId = packet.runtime_id;
         position = packet.player_position;
-        console.log(`[${new Date().toLocaleTimeString()}] ✅ Bot connesso con successo!`);
 
-        let yaw = 0;
-        afkInterval = setInterval(() => {
+        console.log("✅ Connesso!");
+
+        // Movimento continuo (NON ogni 30s!)
+        setInterval(() => {
             if (!isConnected) return;
-            
-            yaw = (yaw + 30) % 360;
-            
-            // Movimento e rotazione visuale
+
+            tick++;
+
+            // movimento casuale realistico
+            position.x += (Math.random() - 0.5) * 0.1;
+            position.z += (Math.random() - 0.5) * 0.1;
+
+            yaw += (Math.random() - 0.5) * 30;
+
             client.write('move_player', {
                 runtime_id: runtimeId,
                 position: position,
@@ -50,38 +51,42 @@ function startBot() {
                 on_ground: true,
                 ridden_runtime_id: 0n,
                 teleport: { cause: 'unknown', source_entity_type: 0 },
-                tick: 0n
+                tick: tick
             });
 
-            // Muove il braccio
-            client.write('animate', { action_id: 'swing_arm', runtime_id: runtimeId });
-        }, 30000); 
+            // azioni casuali
+            if (Math.random() < 0.3) {
+                client.write('animate', {
+                    action_id: 'swing_arm',
+                    runtime_id: runtimeId
+                });
+            }
+
+        }, 1000); // ogni 1 secondo → MOLTO più realistico
     });
 
-    // Gestione degli errori (es: Ping Timed Out, Connection Refused)
+    // IMPORTANTE: aggiorna posizione reale dal server
+    client.on('move_player', (packet) => {
+        position = packet.position;
+    });
+
+    client.on('disconnect', (packet) => {
+        console.log("❌ Kick:", packet.message);
+    });
+
     client.on('error', (err) => {
-        // Messaggio specifico per l'errore
-        console.log(`[${new Date().toLocaleTimeString()}] ❌ Errore di rete: ${err.message}`);
-        isConnected = false;
+        console.log("❌ Errore:", err.message);
     });
 
-    // Gestione della disconnessione (sia kick che spegnimento server)
     client.on('close', () => {
+        console.log("⚠️ Disconnesso");
+
         isConnected = false;
-        if (afkInterval) clearInterval(afkInterval);
 
-        console.log(`[${new Date().toLocaleTimeString()}] ⚠️ BOT DISCONNESSO.`);
-        console.log(`[${new Date().toLocaleTimeString()}] 🔄 Avvio loop di riconnessione (ogni 10s)...`);
-
-        // Cancella eventuali timeout precedenti per evitare sovrapposizioni
-        if (reconnectTimeout) clearTimeout(reconnectTimeout);
-        
-        // Loop infinito: aspetta 10 secondi e richiama startBot
-        reconnectTimeout = setTimeout(() => {
+        setTimeout(() => {
             startBot();
         }, 10000);
     });
 }
 
-// Primo avvio
 startBot();
